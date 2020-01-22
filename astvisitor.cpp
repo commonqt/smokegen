@@ -105,14 +105,7 @@ Parameter SmokegenASTVisitor::toParameter(const clang::ParmVarDecl* param) const
         paramType
     );
 
-    const clang::Expr* defaultArgExpr = nullptr;
-    // Avoid calling getDefaultArg() when the default argument is not yet
-    // parsed or instantiated — calling getDefaultArg() then triggers a
-    // Clang assertion (see ParmVarDecl::getDefaultArg()).
-    if (!param->hasUnparsedDefaultArg() && !param->hasUninstantiatedDefaultArg()) {
-        defaultArgExpr = param->getDefaultArg();
-    }
-    if (defaultArgExpr) {
+    if (const clang::Expr* defaultArgExpr = (param->hasUninstantiatedDefaultArg() ? param->getUninstantiatedDefaultArg() : param->getDefaultArg())) {
         std::string defaultArgStr;
         llvm::raw_string_ostream s(defaultArgStr);
         defaultArgExpr->printPretty(s, nullptr, pp());
@@ -248,7 +241,7 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
             }
             if (const clang::CXXConstructorDecl* ctor = clang::dyn_cast<clang::CXXConstructorDecl>(method)) {
                 newMethod.setIsConstructor(true);
-                if (ctor->isExplicit()) {
+                if (ctor->getExplicitSpecifier().isExplicit()) {
                     newMethod.setFlag(Member::Explicit);
                 }
             }
@@ -346,9 +339,10 @@ Enum* SmokegenASTVisitor::registerEnum(const clang::EnumDecl* clangEnum) const {
     }
 
     for (const clang::EnumConstantDecl* enumVal : clangEnum->enumerators()) {
+        
         EnumMember member(
             e,
-            QString::fromStdString(enumVal->getNameAsString())
+            QString::fromStdString(clangEnum->isScoped() ? name.toStdString() + "::" + enumVal->getNameAsString() : enumVal->getNameAsString())
         );
         // The existing parser doesn't set the values for enums.
         //if (const clang::Expr* initExpr = enumVal->getInitExpr()) {

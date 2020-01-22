@@ -101,76 +101,15 @@ ENDIF("${isSystemDir}" STREQUAL "-1")
 configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/config.h.in config.h @ONLY )
 
 # Embed the clang header into the binary:
-## Robustly locate the Clang builtin include directory across LLVM installs
-if(DEFINED LLVM_INSTALL_PREFIX)
-    set(_llvm_install_root ${LLVM_INSTALL_PREFIX})
-elseif(DEFINED LLVM_DIR)
-    # LLVM_DIR points to the cmake dir; climb up to the install root
-    get_filename_component(_llvm_install_root ${LLVM_DIR} DIRECTORY)
-    get_filename_component(_llvm_install_root ${_llvm_install_root} DIRECTORY)
-else()
-    set(_llvm_install_root "")
-endif()
+#file(GLOB BUILTINS_HEADERS "${LLVM_INSTALL_PREFIX}/lib/clang/${LLVM_PACKAGE_VERSION}/include/*.h")
+#foreach(BUILTIN_HEADER ${BUILTINS_HEADERS})
+#    file(READ ${BUILTIN_HEADER} BINARY_DATA HEX)
+#    string(REGEX REPLACE "(..)" "\\\\x\\1" BINARY_DATA "${BINARY_DATA}")
+#    string(REPLACE "${LLVM_INSTALL_PREFIX}/lib/clang/${LLVM_VERSION}/include/" "/builtins/" FN "${BUILTIN_HEADER}"  )
+#    set(EMBEDDED_DATA "${EMBEDDED_DATA} { \"${FN}\" , \"${BINARY_DATA}\" } , ")
+#endforeach()
 
-set(_clang_candidate_paths)
-if(NOT "${_llvm_install_root}" STREQUAL "")
-    list(APPEND _clang_candidate_paths
-        "${_llvm_install_root}/lib/clang/${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}${LLVM_VERSION_SUFFIX}/include"
-        "${_llvm_install_root}/lib/clang/${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}/include"
-        "${_llvm_install_root}/lib/clang/${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}/include"
-        "${_llvm_install_root}/lib/clang/${LLVM_VERSION_MAJOR}/include"
-        "${_llvm_install_root}/include/clang/${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}/include"
-        "${_llvm_install_root}/include/clang/${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}/include"
-    )
-endif()
-
-# Also include common relative locations based on LLVM_DIR
-if(DEFINED LLVM_DIR)
-    list(APPEND _clang_candidate_paths
-        "${LLVM_DIR}/../../lib/clang/${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}/include"
-        "${LLVM_DIR}/../lib/clang/${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}/include"
-        "${LLVM_DIR}/../include/clang/${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}/include"
-    )
-endif()
-
-list(APPEND _clang_candidate_paths
-    "${CMAKE_PROGRAM_PATH}/../lib/clang/${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}/include"
-)
-
-find_path(CLANG_HEADERS_PATH
-        NAMES stdint.h
-        PATHS ${_clang_candidate_paths}
-        NO_DEFAULT_PATH
-)
-if(CLANG_HEADERS_PATH)
-  file(GLOB BUILTINS_HEADERS "${CLANG_HEADERS_PATH}/*.h")
-  foreach(BUILTIN_HEADER ${BUILTINS_HEADERS})
-      file(READ ${BUILTIN_HEADER} BINARY_DATA HEX)
-      string(REGEX REPLACE "(..)" "\\\\x\\1" BINARY_DATA "${BINARY_DATA}")
-      string(REPLACE "${CLANG_HEADERS_PATH}/" "/builtins/" FN "${BUILTIN_HEADER}"  )
-      set(CHUNK_SIZE 4000)
-      string(LENGTH "${BINARY_DATA}" BINARY_LEN)
-      set(_parts)
-      set(_idx 0)
-      while(_idx LESS BINARY_LEN)
-          math(EXPR _rem "${BINARY_LEN} - ${_idx}")
-          if(_rem GREATER ${CHUNK_SIZE})
-              set(_len ${CHUNK_SIZE})
-          else()
-              set(_len ${_rem})
-          endif()
-          string(SUBSTRING "${BINARY_DATA}" ${_idx} ${_len} _chunk)
-          list(APPEND _parts "\"${_chunk}\"")
-          math(EXPR _idx "${_idx} + ${_len}")
-      endwhile()
-      string(REPLACE ";" " " _joined_parts "${_parts}")
-      string(APPEND EMBEDDED_DATA "  { \"${FN}\" , ${_joined_parts} },\n")
-  endforeach()
-  configure_file(embedded_includes.h.in embedded_includes.h)
-else()
-  message(WARNING "Could not locate Clang builtin headers; embedded builtins will be empty. Proceeding without embedding.")
-  configure_file(embedded_includes.h.in embedded_includes.h)
-endif()
+configure_file(embedded_includes.h.in embedded_includes.h)
 
 add_executable(smokegen ${generator_SRC})
 

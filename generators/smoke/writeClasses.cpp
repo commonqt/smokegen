@@ -89,6 +89,7 @@ void SmokeClassFiles::write(const QList<QString>& keys)
 	    fileOut << "\n#include <windows.h>\n";
 #endif
 
+        fileOut << "\n#include <windows.h>\n";
         // ... and the #includes
         QList<QString> sortedIncludes = includes.values();
         std::sort(sortedIncludes.begin(), sortedIncludes.end());
@@ -276,18 +277,7 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
 
     out << ");\n";
     if (meth.type() != Type::Void) {
-      auto field = Util::stackItemField(meth.type());
-      if (field == "s_enum")
-        out << indent << "x[0]." << field << " = static_cast<long>(" << Util::assignmentString(meth.type(), "xret") << ");\n";
-      else
-#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))                
-        // Dirty hack, stupidy compiler error (::QByteArray name() const). Qt 5.15.2
-        // error : must use 'class' tag to refer to type 'QByteArray' in this scope 
-        if (meth.name().contains("name") &&  meth.type()->toString().contains("QByteArray"))
-          out <<  indent << "x[0]." << field << " = " << "(void*)new class QByteArray(xret);\n";
-        else
-#endif            
-          out << indent << "x[0]." << field << " = " << Util::assignmentString(meth.type(), "xret") << ";\n";
+        out << indent << "x[0]." << Util::stackItemField(meth.type()) << " = " << Util::assignmentString(meth.type(), "xret") << ";\n";
     } else {
         out << indent << "(void)x; // noop (for compiler warning)\n";
     }

@@ -117,7 +117,7 @@ struct Util
     static void preparse(QSet<Type*> *usedTypes, QSet<const Class*> *superClasses, const QList<QString>& keys);
 
     static bool canClassBeInstanciated(const Class* klass);
-    static bool canClassBeCopied(const Class* klass);
+    static bool canClassBeCopied(const Class* klass, QList<const Class*> list = QList<const Class*>());
     static bool hasClassVirtualDestructor(const Class* klass);
     static bool hasClassPublicDestructor(const Class* klass);
     static const Method* findDestructor(const Class* klass);

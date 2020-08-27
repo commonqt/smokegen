@@ -315,6 +315,7 @@ void Util::preparse(QSet<Type*> *usedTypes, QSet<const Class*> *superClasses, co
         foreach (auto base, Util::superClassList(&klass)) {
             superClasses->insert(base);
         }
+
         if (!klass.isNameSpace()) {
             addDefaultConstructor(&klass);
             addCopyConstructor(&klass);
@@ -405,11 +406,30 @@ bool Util::canClassBeInstanciated(const Class* klass)
     return ret;
 }
 
-bool Util::canClassBeCopied(const Class* klass)
+bool Util::canClassBeCopied(const Class* klass, QList<const Class*> list)
 {
     static QHash<const Class*, bool> cache;
+
     if (cache.contains(klass))
         return cache[klass];
+
+    bool allMembersCopiable = true;
+    if (!list.contains(klass)) {
+        list.append(klass);
+        foreach(auto field, klass->fields())
+        {
+            // Move on when checking native types
+            if (!field.type() || field.type()->isIntegral() || !field.type()->getClass() || field.type()->pointerDepth() > 0)
+                continue;
+
+            if (!canClassBeCopied(field.type()->getClass(), list))
+            {
+                allMembersCopiable = false;
+                break;
+            }
+        }
+        list.removeAll(klass);
+    }
 
     bool privateCopyCtorFound = false;
     foreach (const Method& meth, klass->methods()) {
@@ -434,8 +454,9 @@ bool Util::canClassBeCopied(const Class* klass)
     }
 
     // if the parent can be copied and we didn't find a private copy c'tor, the class is copiable
-    bool ret = (parentCanBeCopied && !privateCopyCtorFound);
+    bool ret = (parentCanBeCopied && !privateCopyCtorFound && allMembersCopiable);
     cache[klass] = ret;
+
     return ret;
 }
 
@@ -537,7 +558,6 @@ void Util::addDefaultConstructor(Class* klass)
         else if (meth.isDestructor() && meth.access() == Access_private)
             return;
     }
-    
     Type t = Type(klass);
     t.setPointerDepth(1);
     Method meth = Method(klass, klass->name(), Type::registerType(t));
@@ -565,6 +585,7 @@ void Util::addCopyConstructor(Class* klass)
             return;
     }
 
+    if (canClassBeCopied(klass)) {
         Type t = Type(klass);
         t.setPointerDepth(1);
         Method meth = Method(klass, klass->name(), Type::registerType(t));
@@ -573,6 +594,7 @@ void Util::addCopyConstructor(Class* klass)
         Type paramType = Type(klass, true); paramType.setIsRef(true);
         meth.appendParameter(Parameter("copy", Type::registerType(paramType)));
         klass->appendMethod(meth);
+    }
 }
 
 void Util::addDestructor(Class* klass)

@@ -594,6 +594,7 @@ public:
 
     QString toString(const QString& fnPtrName = QString(), bool prepend = true) const;
 
+    bool isAssignable();
 
     // on windows, we can't reference 'types' here, because it's marked __declspec(dllexport) above.
     static Type* registerType(const Type& type)

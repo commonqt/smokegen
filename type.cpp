@@ -224,29 +224,18 @@ QString Type::toString(const QString& fnPtrName, bool prepend) const
     return ret.replace(">>", "> >");
 }
 
-void validateAll()
-{
-    if (!qEnvironmentVariableIsSet("SMOKETRACE_VALIDATE")) return;
-    qDebug() << "validateAll: scanning registries...";
-
-    // Check typedefs
-    int tcount = 0;
-    for (auto it = typedefs.begin(); it != typedefs.end(); ++it) {
-        ++tcount;
-        const Typedef& td = it.value();
-        if (td.name().isEmpty()) qDebug() << "  typedef with empty name at key:" << it.key();
-        if (!td.type()) qDebug() << "  typedef" << td.name() << "has null type pointer";
+bool Type::isAssignable() {
+    const Class* klass = getClass();   
+    if (klass)
+    {
+        foreach(auto meth, klass->methods()) {
+            if (meth.name() == "operator=" && meth.parameters().first().type() == this) {
+                return !meth.isDeleted();
+            }
+        }
     }
-    qDebug() << "  typedefs:" << tcount;
-
-    // Check types
-    int tycount = 0;
-    for (auto it = types.begin(); it != types.end(); ++it) {
-        ++tycount;
-        const Type& ty = it.value();
-        if (ty.name().isEmpty()) qDebug() << "  type with empty name at key:" << it.key();
-    }
-    qDebug() << "  types:" << tycount;
+    else
+        return true;
 }
 
 void Class::appendMethod(const Method& method, bool checkForConstArguments)

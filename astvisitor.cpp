@@ -1,4 +1,5 @@
 #include <regex>
+#include <iostream>
 
 #include <clang/AST/ASTContext.h>
 #include <clang/Basic/Version.h>
@@ -31,7 +32,6 @@ bool SmokegenASTVisitor::VisitFunctionDecl(clang::FunctionDecl *D) {
     if (D->isDependentContext() || D->getTemplateSpecializationInfo()) {
         return true;
     }
-
 
     // Skip functions that use va_args
     for (const clang::ParmVarDecl* parm : D->parameters()) {
@@ -142,6 +142,7 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
     }
 
     QString name = QString::fromStdString(clangClass->getNameAsString());
+
     QString nspace;
     Class* parent = nullptr;
     if (const auto clangParent = clang::dyn_cast<clang::NamespaceDecl>(clangClass->getParent())) {
@@ -179,37 +180,46 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
         klass->setIsTemplate(true);
     }
 
-    if (!isForward && !clangClass->getTypeForDecl()->isDependentType()) {
-        addQPropertyAnnotations(clangClass);
+    if (!isForward) {
+        if (!clangClass->getTypeForDecl()->isDependentType()) {
+            addQPropertyAnnotations(clangClass);
 
-        // Set base classes
-        for (const clang::CXXBaseSpecifier& base : clangClass->bases()) {
-            const clang::CXXRecordDecl* baseRecordDecl = base.getType()->getAsCXXRecordDecl();
+            // Set base classes
+            for (const clang::CXXBaseSpecifier& base : clangClass->bases()) {
+                const clang::CXXRecordDecl* baseRecordDecl = base.getType()->getAsCXXRecordDecl();
 
-            if (!baseRecordDecl) {
-                // Ignore template specializations
-                continue;
+                if (!baseRecordDecl) {
+                    // Ignore template specializations
+                    continue;
+                }
+
+                Class::BaseClassSpecifier baseClass = Class::BaseClassSpecifier{
+                    &classes[QString::fromStdString(baseRecordDecl->getQualifiedNameAsString())],
+                    toAccess(base.getAccessSpecifier()),
+                    base.isVirtual()
+                };
+
+                klass->appendBaseClass(baseClass);
             }
-
-            Class::BaseClassSpecifier baseClass = Class::BaseClassSpecifier {
-                &classes[QString::fromStdString(baseRecordDecl->getQualifiedNameAsString())],
-                toAccess(base.getAccessSpecifier()),
-                base.isVirtual()
-            };
-
-            klass->appendBaseClass(baseClass);
         }
 
         // Set methods
-        for (const clang::CXXMethodDecl* method : clangClass->methods()) {
+        QList<const clang::CXXMethodDecl*> methods;
+
+        for (auto method : clangClass->methods())
+            methods.append(method);
+
+        for (const clang::CXXMethodDecl* method : methods) {
             if (method->isImplicit()) {
                 continue;
             }
-            Type* returnType = registerType(getReturnTypeForFunction(method));
-            if (!returnType) {
-                qWarning() << "Failed to register return type for method" << QString::fromStdString(method->getNameAsString());
+
+            clang::QualType clangReturnType = getReturnTypeForFunction(method);
+
+            if (klass->isTemplate() && clang::dyn_cast<clang::TemplateSpecializationType>(clangReturnType))
                 continue;
-            }
+
+            Type* returnType = registerType(clangReturnType);
             if (returnType->getTypedef()) {
                 Type* resolved = typeFromTypedef(returnType->getTypedef(), returnType);
                 if (resolved) {
@@ -222,6 +232,13 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
                 returnType,
                 method->isDeleted() ? Access_private : toAccess(method->getAccess())
             );
+
+            if (method->isDeleted()) newMethod.setIsDeleted(true);
+            // Avoid collecting methods we do not know how to call it.
+            // We need to collect some information about template classes but... take it easy...
+            if (klass->isTemplate() && newMethod.access() != Access_private)
+                continue;
+
             for (auto attr_it = method->specific_attr_begin<clang::AnnotateAttr>();
               attr_it != method->specific_attr_end<clang::AnnotateAttr>();
               ++attr_it) {
@@ -239,7 +256,9 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
             if (const clang::CXXConversionDecl* conversion = clang::dyn_cast<clang::CXXConversionDecl>(method)) {
                 newMethod.setName(QString::fromStdString("operator " + conversion->getConversionType().getAsString(pp())));
             }
+
             if (const clang::CXXConstructorDecl* ctor = clang::dyn_cast<clang::CXXConstructorDecl>(method)) {
+                // if (!ctor->isDeleted() && clangClass->isAbstract()) continue;
                 newMethod.setIsConstructor(true);
                 if (ctor->getExplicitSpecifier().isExplicit()) {
                     newMethod.setFlag(Member::Explicit);
@@ -259,11 +278,27 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
                 newMethod.setFlag(Member::Static);
             }
 
+            bool foundNotCompatibleParameter = false;
             for (const clang::ParmVarDecl* param : method->parameters()) {
+                if (klass->isTemplate() && clang::dyn_cast<clang::TemplateTypeParmType>(param->getType()))
+                {
+                    foundNotCompatibleParameter = true;
+                    break;
+                }
+
+                // TODO handle RValue on functions xpto(type &&s)
+                if (clang::dyn_cast<clang::RValueReferenceType>(param->getType()))
+                {
+                    foundNotCompatibleParameter = true;
+                    break;
+                }
                 newMethod.appendParameter(toParameter(param));
             }
 
-            klass->appendMethod(newMethod);
+            if (foundNotCompatibleParameter)
+                continue;
+
+            klass->appendMethod(newMethod, true);
         }
 
         for (const clang::Decl* decl : clangClass->decls()) {
@@ -274,9 +309,6 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
             }
             const clang::DeclaratorDecl* declaratorDecl = clang::dyn_cast<clang::DeclaratorDecl>(decl);
             Type* fieldType = registerType(declaratorDecl->getType());
-            if (!fieldType) {
-                continue;
-            }
             if (fieldType->getTypedef()) {
                 Type* resolved = typeFromTypedef(fieldType->getTypedef(), fieldType);
                 if (resolved) {

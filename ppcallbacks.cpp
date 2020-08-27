@@ -1,5 +1,5 @@
 #include "ppcallbacks.h"
-#include <clang/Basic/FileManager.h>
+#include "clang/Basic/FileManager.h"
 
 void SmokegenPPCallbacks::InjectQObjectDefs(clang::SourceLocation Loc) {
     #include "qobjectdefs-injected.h"

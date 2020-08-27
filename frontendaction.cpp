@@ -13,18 +13,5 @@ SmokegenFrontendAction::CreateASTConsumer(clang::CompilerInstance &CI, clang::St
         CI.getFrontendOpts().SkipFunctionBodies = true;
         CI.getDiagnostics().setSeverity(clang::diag::warn_undefined_inline, clang::diag::Severity::Ignored, clang::SourceLocation());
 
-        auto consumer = std::make_unique<SmokegenASTConsumer>(CI);
-        qDebug() << "CreateASTConsumer succeeded for" << QString::fromStdString(file.str());
-        return consumer;
-    } catch (const std::exception &e) {
-        qCritical() << "CreateASTConsumer threw exception:" << e.what();
-        throw;
-    } catch (...) {
-        qCritical() << "CreateASTConsumer threw unknown exception";
-        throw;
-    }
-}
-
-void SmokegenFrontendAction::EndSourceFileAction() {
-    // Just log - don't try to exit or abort, let clang report errors normally
+    return std::make_unique<SmokegenASTConsumer>(CI);
 }

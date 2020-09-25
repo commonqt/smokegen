@@ -156,6 +156,7 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
     QString methodBody;
     QTextStream out(&methodBody);
 
+    //out << "        qDebug(\"Begin of " << meth.toString() << "\");\n";
     out << indent;
 
     if (meth.isConstructor()) {
@@ -221,52 +222,27 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
 
 	QString field = Util::stackItemField(param.type());
         QString typeName = param.type()->toString();
-        if (Util::TypeErroneusOrIncomplete.contains(typeName))
-	  typeName = Util::TypeErroneusOrIncomplete.value(typeName);      
+
         if (param.type()->name().contains("QWebEngineCallback"))
-          {
+        {
             typeName = "void (*)(const QVariant)";
-          }
-        else {
-          if (param.type()->isArray()) {
-            Type t = *param.type();
-            t.setPointerDepth(t.pointerDepth() + 1);
-            t.setIsRef(false);
-            typeName = t.toString();
-            out << '*';
-          }
-          else if (field == "s_class" && (param.type()->pointerDepth() == 0 || param.type()->isRef()) && !param.type()->isFunctionPointer()) {
-            // references and classes are passed in s_class
-            typeName.append('*');
-            out << '*';
-          }
-	  // Erroneous cast.
-	  if (typeName.contains("&(*)") && meth.name().contains("Init"))
-	    typeName.replace("&", "");	  
-          // casting to a reference doesn't make sense in this case
-          if (param.type()->isRef() && !param.type()->isFunctionPointer()) {
-            //Multiples '&' example "const std::function<void (const QWebEngineFindTextResult &)>&"
-            int pos = typeName.lastIndexOf('&');
-            typeName.replace(pos,1, ' ');
-          }
         }
-        //error C2872: 'QTransform': ambiguous symbol
-	if (smokeClassName == "x_QGlobalSpace" && typeName.contains("QTransform"))
-          typeName.replace("QTransform","::QTransform");
-	else
-	  //error: 'QAction': ambiguous symbol
-	  if (smokeClassName == "x_QGlobalSpace" && typeName.contains("QAction"))
-	    typeName.replace("QAction","::QAction");
-	  else
-	    //error: 'QAbstractAnimationn': ambiguous symbol
-	    if (smokeClassName == "x_QGlobalSpace" && typeName.contains("QAbstractAnimation"))
-	      typeName.replace("QAbstractAnimation","::QAbstractAnimation");
-	    else
-	      if (smokeClassName == "x_Qt3DInput" && (meth.name().contains("qt_getEnumName") || meth.name().contains("qt_getEnumMetaObject")))
-		typeName.replace(typeName,"Qt3DInput::" + typeName);
-	      else
-		if (smokeClassName == "x_Qt3DAnimation" && (meth.name().contains("qt_getEnumName") || meth.name().contains("qt_getEnumMetaObject")))
-		  typeName.replace(typeName,"Qt3DAnimation::" + typeName);
+        else {
+            if (param.type()->isArray()) {
+                Type t = *param.type();
+                t.setPointerDepth(t.pointerDepth() + 1);
+                t.setIsRef(false);
+                typeName = t.toString();
+                out << '*';
+            }
+            else if (field == "s_class" && (param.type()->pointerDepth() == 0 || param.type()->isRef()) && !param.type()->isFunctionPointer()) {
+                // references and classes are passed in s_class
+                typeName.append('*');
+                out << '*';
+            }
+            // casting to a reference doesn't make sense in this case
+            if (param.type()->isRef() && !param.type()->isFunctionPointer()) typeName.replace('&', "");
+        }
         out << "(" << typeName << ")" << "x[" << j + 1 << "]." << field;
     }
     // if the method has any other default parameters, append them here as values
@@ -291,7 +267,7 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
     } else {
         out << indent << "(void)x; // noop (for compiler warning)\n";
     }
-
+    //out << "        qDebug(\"End of " << meth.toString() << "\");\n";
     return methodBody;
 }
 
@@ -324,7 +300,6 @@ void SmokeClassFiles::generateMethod(QTextStream& out, const QString& className,
                                   className, smokeClassName, meth, index, true, includes, privateDestructor);
         out << "        }\n";
     }
-
     out << "    }\n";
     
     // If the constructor was generated from another one with default parameteres, we don't need to explicitly create

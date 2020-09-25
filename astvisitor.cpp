@@ -233,7 +233,10 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
                 method->isDeleted() ? Access_private : toAccess(method->getAccess())
             );
 
-            if (method->isDeleted()) newMethod.setIsDeleted(true);
+
+            newMethod.setIsDeleted(method->isDeleted());
+
+
             // Avoid collecting methods we do not know how to call it.
             // We need to collect some information about template classes but... take it easy...
             if (klass->isTemplate() && newMethod.access() != Access_private)

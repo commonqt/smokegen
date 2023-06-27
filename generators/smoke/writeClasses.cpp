@@ -171,7 +171,11 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
 
     out << ");\n";
     if (meth.type() != Type::Void) {
-        out << indent << "x[0]." << Util::stackItemField(meth.type()) << " = " << Util::assignmentString(meth.type(), "xret") << ";\n";
+      auto field = Util::stackItemField(meth.type());
+      if (field == "s_enum")
+        out << indent << "x[0]." << field << " = static_cast<long>(" << Util::assignmentString(meth.type(), "xret") << ");\n";
+      else
+        out << indent << "x[0]." << field << " = " << Util::assignmentString(meth.type(), "xret") << ";\n";
     } else {
         out << indent << "(void)x; // noop (for compiler warning)\n";
     }
@@ -271,7 +275,7 @@ void SmokeClassFiles::generateSetAccessor(QTextStream& out, const QString& class
 void SmokeClassFiles::generateEnumMemberCall(QTextStream& out, const QString& parentName, const QString& className, bool isScoped, const QString& member, int index)
 {
     out << "    static void x_" << index << "(Smoke::Stack x) {\n"
-        << "        x[0].s_enum = (long)";
+        << "        x[0].s_enum = static_cast<long>(";
     
     if (!parentName.isEmpty()) {
         out << parentName << "::";
@@ -280,7 +284,7 @@ void SmokeClassFiles::generateEnumMemberCall(QTextStream& out, const QString& pa
         out << className << "::";
     }
     
-    out << member << ";\n"
+    out << member << ");\n"
         << "    }\n";
 }
 

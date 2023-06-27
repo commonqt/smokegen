@@ -170,9 +170,17 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
 
     // if the method has any other default parameters, append them here as values
     if (!meth.remainingDefaultValues().isEmpty()) {
-        const QStringList& defaultParams = meth.remainingDefaultValues();
-        if (meth.parameters().count() > 0)
-            out << "," ;
+      QStringList  defaultParams = QStringList(meth.remainingDefaultValues());
+      QString substituted;
+      //Avoid error : reference to type 'const ClassName' cannot bind to an initializer list
+      for (int i = 0; i < defaultParams.size(); ++i) {
+        if (defaultParams.at(i).contains("{}")) {
+          substituted = defaultParams.at(i);
+          defaultParams.replaceInStrings(substituted,"{}");
+        }
+      }
+      if (meth.parameters().count() > 0)
+        out << "," ;
         out << defaultParams.join(",");
     }
 

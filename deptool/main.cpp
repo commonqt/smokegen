@@ -21,13 +21,14 @@
 #include <QtDebug>
 
 #include <smoke.h>
+#include <QRegularExpression>
 
 using InitSmokeFn = void (*)();
 
 Smoke* loadSmokeModule(QFileInfo file) {
     QLibrary lib(file.filePath());
 
-    QString moduleName = file.baseName().replace(QRegExp("^libsmoke"), QString());
+    QString moduleName = file.baseName().replace(QRegularExpression("^libsmoke"), QString());
 
     QString init_name = "init_" + moduleName + "_Smoke";
     InitSmokeFn init = (InitSmokeFn) lib.resolve(init_name.toLatin1());

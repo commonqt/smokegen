@@ -225,7 +225,7 @@ public:
     void removeFlag(Flag flag) { m_flags &= ~flag; }
     Flags flags() const { return m_flags; }
 
-    virtual QString toString(bool withAccess = false, bool withClass = false) const;
+    QString toString(bool withAccess = false, bool withClass = false) const;
 
 protected:
     BasicTypeDeclaration* m_typeDecl;
@@ -327,7 +327,7 @@ public:
     void appendExceptionType(const Type& type) { m_exceptionTypes.append(type); }
     const QList<Type>& exceptionTypes() const { return m_exceptionTypes; }
 
-    virtual QString toString(bool withAccess = false, bool withClass = false, bool withInitializer = true) const;
+    QString toString(bool withAccess = false, bool withClass = false, bool withInitializer = true) const;
 
 protected:
     ParameterList m_params;

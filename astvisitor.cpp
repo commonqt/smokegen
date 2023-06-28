@@ -373,7 +373,6 @@ Function* SmokegenASTVisitor::registerFunction(const clang::FunctionDecl* clangF
 }
 
 Type* SmokegenASTVisitor::registerType(clang::QualType clangType) const {
-    clang::QualType orig = clang::QualType(clangType);
 
     Type type;
 

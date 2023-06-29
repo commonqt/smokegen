@@ -32,6 +32,13 @@
 SmokeClassFiles::SmokeClassFiles(SmokeDataFile *data)
     : m_smokeData(data)
 {
+    // Error overrides a 'final' function 
+    Util::OverridesFinalFunction.append("axisCount");
+    Util::OverridesFinalFunction.append("buttonCount");
+    Util::OverridesFinalFunction.append("axisNames");
+    Util::OverridesFinalFunction.append("buttonNames");
+    Util::OverridesFinalFunction.append("axisIdentifier");
+    Util::OverridesFinalFunction.append("buttonIdentifier");	
 }
 
 void SmokeClassFiles::write()
@@ -82,7 +89,28 @@ void SmokeClassFiles::write(const QList<QString>& keys)
                fileOut << "#include <" << str << ">\n";
         }
 
+        //Missing qrenderapi.h
+        if (Options::module.contains("3drender"))
+          fileOut << "#include <qrenderapi.h>\n";
+		
         fileOut << "\n#include <smoke.h>\n#include <" << Options::module << "_smoke.h>\n";
+
+        if (Options::module.contains("3d")) {
+          if (Options::module.contains("3dcore"))
+            fileOut << "\nusing namespace Qt3DCore;\n";
+          else if (Options::module.contains("3danimation"))
+            fileOut << "\nusing namespace Qt3DAnimation;\n";
+          else if (Options::module.contains("3dextras")) {
+            fileOut << "\nusing namespace Qt3DExtras;\n";
+            fileOut << "using namespace Qt3DRender;\n";
+            fileOut << "using namespace Qt3DCore;\n";
+          } else if (Options::module.contains("3dinput"))
+            fileOut << "\nusing namespace Qt3DInput;\n";
+          else if (Options::module.contains("3dlogic"))
+            fileOut << "\nusing namespace Qt3DLogic;\n";
+          else if (Options::module.contains("3drender"))
+            fileOut << "\nusing namespace Qt3DRender;\n";
+        }			
 
         fileOut << "\nclass __internal_SmokeClass {};\n";
 
@@ -130,6 +158,9 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
         if (!(meth.flags() & Method::Static)) {
             QString objName = privateDestructor ? "obj" : "this";
             if (meth.isConst()) {
+              if (Util::OverridesFinalFunction.contains(meth.name()))
+                out << "((" << (privateDestructor ? className : smokeClassName) << QString("*)%1)->").arg(objName);
+              else
                 out << "((const " << (privateDestructor ? className : smokeClassName) << QString("*)%1)->").arg(objName);
             } else {
                 out << QString("%1->").arg(objName);
@@ -140,6 +171,7 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
             out << className << "::";
         } else if (func) {
             if (!func->nameSpace().isEmpty())
+              if (!meth.name().contains("qt_getEnumName")  && !meth.name().contains("qt_getEnumMetaObject"))
                 out << func->nameSpace() << "::";
         }
         out << meth.name() << "(";
@@ -174,7 +206,10 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
           // casting to a reference doesn't make sense in this case
           if (param.type()->isRef() && !param.type()->isFunctionPointer()) typeName.replace('&', "");
         }
-        out << "(" << typeName << ")" << "x[" << j + 1 << "]." << field;
+        if (smokeClassName == "x_Qt3DInput" && (meth.name().contains("qt_getEnumName") || meth.name().contains("qt_getEnumMetaObject")))
+          out << "(" << "Qt3DInput::" << typeName << ")" << "x[" << j + 1 << "]." << field;
+        else 
+          out << "(" << typeName << ")" << "x[" << j + 1 << "]." << field;
     }
 
     // if the method has any other default parameters, append them here as values
@@ -340,6 +375,7 @@ void SmokeClassFiles::generateVirtualMethod(QTextStream& out, const Method& meth
     }
     out << ") ";
     if (meth.isConst())
+      if (!Util::OverridesFinalFunction.contains(meth.name()))
         out << "const ";
     if (meth.hasExceptionSpec()) {
         out << "throw(";

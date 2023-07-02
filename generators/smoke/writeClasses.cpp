@@ -208,7 +208,11 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
             out << '*';
           }
           // casting to a reference doesn't make sense in this case
-          if (param.type()->isRef() && !param.type()->isFunctionPointer()) typeName.replace('&', "");
+          if (param.type()->isRef() && !param.type()->isFunctionPointer()) {
+            //Multiples '&' example "const std::function<void (const QWebEngineFindTextResult &)>&"
+            int pos = typeName.lastIndexOf('&');
+            typeName.replace(pos,1, ' ');
+          }
         }
         if (smokeClassName == "x_Qt3DInput" && (meth.name().contains("qt_getEnumName") || meth.name().contains("qt_getEnumMetaObject")))
           out << "(" << "Qt3DInput::" << typeName << ")" << "x[" << j + 1 << "]." << field;

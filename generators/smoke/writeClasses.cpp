@@ -211,6 +211,9 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
             typeName.append('*');
             out << '*';
           }
+	  // Erroneous cast.
+	  if (typeName.contains("&(*)") && meth.name().contains("Init"))
+	    typeName.replace("&", "");	  
           // casting to a reference doesn't make sense in this case
           if (param.type()->isRef() && !param.type()->isFunctionPointer()) {
             //Multiples '&' example "const std::function<void (const QWebEngineFindTextResult &)>&"

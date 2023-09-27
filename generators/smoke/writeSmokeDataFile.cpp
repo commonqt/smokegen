@@ -220,12 +220,19 @@ void SmokeDataFile::write()
                 if (indices.contains(index))
                     continue;
                 indices << index;
-                
-                out << QString("        case %1: return (void*)(%2*)(%3*)xptr;\n")
+		
+		if (className.isEmpty())
+		  out << QString("        case %1: return (void*)(%2*)xptr;\n")
+                    .arg(index).arg(klass.toString());
+		else
+		  out << QString("        case %1: return (void*)(%2*)(%3*)xptr;\n")
                     .arg(index).arg(className).arg(klass.toString());
             }
         }
-        out << QString("        case %1: return (void*)(%2*)xptr;\n").arg(iter.value()).arg(klass.toString());
+	if (klass.toString().isEmpty())
+	  out << QString("        case %1: return (void*)(%2*)xptr;\n").arg(iter.value()).arg(iter.key());
+	else
+	  out << QString("        case %1: return (void*)(%2*)xptr;\n").arg(iter.value()).arg(klass.toString());
         foreach (const Class* desc, Util::descendantsList(&klass)) {
             QString className = desc->toString();
             
@@ -239,6 +246,10 @@ void SmokeDataFile::write()
                     out << QString("        case %1: return (void*)dynamic_cast<%2*>((%3*)xptr);\n")
                         .arg(index).arg(className).arg(klass.toString());
                 } else {
+		  if (klass.toString().isEmpty())
+		    out << QString("        case %1: return (void*)(%2*)(%3*)xptr;\n")
+                        .arg(index).arg(className).arg(iter.key());
+		  else
                     out << QString("        case %1: return (void*)(%2*)(%3*)xptr;\n")
                         .arg(index).arg(className).arg(klass.toString());
                 }

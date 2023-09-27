@@ -229,8 +229,15 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
 	  if (smokeClassName == "x_QGlobalSpace" && typeName.contains("QAction"))
 	    typeName.replace("QAction","::QAction");
 	  else
-	    if (smokeClassName == "x_Qt3DInput" && (meth.name().contains("qt_getEnumName") || meth.name().contains("qt_getEnumMetaObject")))
-	      typeName.replace(typeName,"Qt3DInput::" + typeName);
+	    //error: 'QAbstractAnimationn': ambiguous symbol
+	    if (smokeClassName == "x_QGlobalSpace" && typeName.contains("QAbstractAnimation"))
+	      typeName.replace("QAbstractAnimation","::QAbstractAnimation");
+	    else
+	      if (smokeClassName == "x_Qt3DInput" && (meth.name().contains("qt_getEnumName") || meth.name().contains("qt_getEnumMetaObject")))
+		typeName.replace(typeName,"Qt3DInput::" + typeName);
+	      else
+		if (smokeClassName == "x_Qt3DAnimation" && (meth.name().contains("qt_getEnumName") || meth.name().contains("qt_getEnumMetaObject")))
+		  typeName.replace(typeName,"Qt3DAnimation::" + typeName);
         out << "(" << typeName << ")" << "x[" << j + 1 << "]." << field;
     }
     // if the method has any other default parameters, append them here as values

@@ -222,10 +222,15 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
           }
         }
         //error C2872: 'QTransform': ambiguous symbol
- 	if (smokeClassName == "x_QGlobalSpace" && typeName.contains("QTransform"))
+	if (smokeClassName == "x_QGlobalSpace" && typeName.contains("QTransform"))
           typeName.replace("QTransform","::QTransform");
-        else if (smokeClassName == "x_Qt3DInput" && (meth.name().contains("qt_getEnumName") || meth.name().contains("qt_getEnumMetaObject")))
-          typeName.replace(typeName,"Qt3DInput::" + typeName);
+	else
+	  //error: 'QAction': ambiguous symbol
+	  if (smokeClassName == "x_QGlobalSpace" && typeName.contains("QAction"))
+	    typeName.replace("QAction","::QAction");
+	  else
+	    if (smokeClassName == "x_Qt3DInput" && (meth.name().contains("qt_getEnumName") || meth.name().contains("qt_getEnumMetaObject")))
+	      typeName.replace(typeName,"Qt3DInput::" + typeName);
         out << "(" << typeName << ")" << "x[" << j + 1 << "]." << field;
     }
     // if the method has any other default parameters, append them here as values

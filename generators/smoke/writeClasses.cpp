@@ -200,8 +200,8 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
         addIncludesForType(includes, param.type());
 
         if (j > 0) out << ",";
-        
-        QString field = Util::stackItemField(param.type());
+
+	QString field = Util::stackItemField(param.type());
         QString typeName = param.type()->toString();
         if (Util::TypeErroneusOrIncomplete.contains(typeName))
 	  typeName = Util::TypeErroneusOrIncomplete.value(typeName);      

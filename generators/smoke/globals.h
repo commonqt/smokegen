@@ -108,6 +108,7 @@ struct Util
     static QHash<const Method*, const Field*> fieldAccessors;
 
     static QStringList OverridesFinalFunction;
+    static QHash<QString, QString> TypeErroneusOrIncomplete;
     
     static bool isVirtualInheritancePath(const Class* desc, const Class* super);
     static QList<const Class*> superClassList(const Class* klass);

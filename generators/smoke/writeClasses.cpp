@@ -38,7 +38,12 @@ SmokeClassFiles::SmokeClassFiles(SmokeDataFile *data)
     Util::OverridesFinalFunction.append("axisNames");
     Util::OverridesFinalFunction.append("buttonNames");
     Util::OverridesFinalFunction.append("axisIdentifier");
-    Util::OverridesFinalFunction.append("buttonIdentifier");	
+    Util::OverridesFinalFunction.append("buttonIdentifier");
+    
+    Util::TypeErroneusOrIncomplete.insert("BRepGProp_Gauss::", "BRepGProp_Gauss::BRepGProp_GaussType");
+    Util::TypeErroneusOrIncomplete.insert("BRepGProp_MeshProps::", "BRepGProp_MeshProps::BRepGProp_MeshObjType");
+    Util::TypeErroneusOrIncomplete.insert("const BRepGProp_Gauss::", "const BRepGProp_Gauss::BRepGProp_GaussType");
+    Util::TypeErroneusOrIncomplete.insert("const BRepGProp_MeshProps::", "const BRepGProp_MeshProps::BRepGProp_MeshObjType");
 }
 
 void SmokeClassFiles::write()
@@ -161,8 +166,12 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
             out << "class QByteArray" << " xret = ";
           else		  
 #endif
-            out << meth.type()->toString() << " xret = ";
-        }
+	    {
+	      QString typeName = meth.type()->toString();
+	      out << (Util::TypeErroneusOrIncomplete.contains(typeName) ? Util::TypeErroneusOrIncomplete.value(typeName)
+		                                                        : typeName)  << " xret = ";
+	    }
+	}
         if (!(meth.flags() & Method::Static)) {
             QString objName = privateDestructor ? "obj" : "this";
             if (meth.isConst()) {
@@ -191,9 +200,11 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
         addIncludesForType(includes, param.type());
 
         if (j > 0) out << ",";
-
+        
         QString field = Util::stackItemField(param.type());
         QString typeName = param.type()->toString();
+        if (Util::TypeErroneusOrIncomplete.contains(typeName))
+	  typeName = Util::TypeErroneusOrIncomplete.value(typeName);      
         if (param.type()->name().contains("QWebEngineCallback"))
           {
             typeName = "void (*)(const QVariant)";
@@ -314,9 +325,12 @@ void SmokeClassFiles::generateMethod(QTextStream& out, const QString& className,
     if (meth.isConstructor() && meth.remainingDefaultValues().isEmpty()) {
         out << "    explicit " << smokeClassName << '(';
         QStringList x_list;
+        QString param;
         for (int i = 0; i < meth.parameters().count(); i++) {
             if (i > 0) out << ", ";
-            out << meth.parameters()[i].type()->toString() << " x" << QString::number(i + 1);
+            param = meth.parameters()[i].type()->toString();
+            out << (Util::TypeErroneusOrIncomplete.contains(param) ? Util::TypeErroneusOrIncomplete.value(param) : param)
+                << " x" << QString::number(i + 1);
             x_list << "x" + QString::number(i + 1);
         }
         out << ") : " << meth.getClass()->name() << '(' << x_list.join(", ") << ") {}\n";

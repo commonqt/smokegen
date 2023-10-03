@@ -168,6 +168,8 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
 #endif
 	    {
 	      QString typeName = meth.type()->toString();
+	      // Reference to pointer?
+	      if (typeName.contains("*&")) typeName.replace("&", "");
 	      out << (Util::TypeErroneusOrIncomplete.contains(typeName) ? Util::TypeErroneusOrIncomplete.value(typeName)
 		                                                        : typeName)  << " xret = ";
 	    }

@@ -145,13 +145,13 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
     }
     Class::Kind kind;
     switch (clangClass->getTagKind()) {
-        case clang::TTK_Class:
+        case clang::TagTypeKind::Class:
             kind = Class::Kind_Class;
             break;
-        case clang::TTK_Struct:
+        case clang::TagTypeKind::Struct:
             kind = Class::Kind_Struct;
             break;
-        case clang::TTK_Union:
+        case clang::TagTypeKind::Union:
             kind = Class::Kind_Union;
             break;
         default:
@@ -236,7 +236,7 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
             newMethod.setIsConst(method->isConst());
             if (method->isVirtual()) {
                 newMethod.setFlag(Member::Virtual);
-                if (method->isPure()) {
+                if (method->isPureVirtual()) {
                     newMethod.setFlag(Member::PureVirtual);
                 }
             }
@@ -461,7 +461,7 @@ Type* SmokegenASTVisitor::registerType(clang::QualType clangType) const {
         const auto templateSpecializationDecl = clang::dyn_cast<clang::ClassTemplateSpecializationDecl>(clangClass);
         if (templateSpecializationDecl) {
             const auto & args = templateSpecializationDecl->getTemplateArgs();
-            for (int i=0; i < args.size(); ++i) {
+            for (size_t i=0; i < args.size(); ++i) {
                 switch (args[i].getKind()) {
                     case clang::TemplateArgument::Integral:
                     {
@@ -567,7 +567,10 @@ void SmokegenASTVisitor::addQPropertyAnnotations(const clang::CXXRecordDecl* D) 
         if (clang::StaticAssertDecl *S = llvm::dyn_cast<clang::StaticAssertDecl>(d) ) {
             if (auto *E = llvm::dyn_cast<clang::UnaryExprOrTypeTraitExpr>(S->getAssertExpr())) {
                 if (clang::ParenExpr *PE = llvm::dyn_cast<clang::ParenExpr>(E->getArgumentExpr())) {
-                    llvm::StringRef key = S->getMessage()->getString();
+                    llvm::StringRef key;
+                    if (const auto *msg = llvm::dyn_cast<clang::StringLiteral>(S->getMessage())) {
+                        key = msg->getString();
+                    }
                     if (key == "qt_property") {
                         clang::StringLiteral *Val = llvm::dyn_cast<clang::StringLiteral>(PE->getSubExpr());
 

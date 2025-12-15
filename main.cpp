@@ -250,8 +250,8 @@ int main(int argc, char **argv)
         llvm::IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> inMemoryFS{new llvm::vfs::InMemoryFileSystem()};
         overlayFS->pushOverlay(inMemoryFS);
 
-        for (const EmbeddedFile& file : EmbeddedFiles) {
-            inMemoryFS->addFile(file.filename, 0, llvm::MemoryBuffer::getMemBuffer({file.content, file.size}));
+        for (const EmbeddedFile* ef = EmbeddedFiles; ef && ef->filename; ++ef) {
+            inMemoryFS->addFile(ef->filename, 0, llvm::MemoryBuffer::getMemBuffer({ef->content, ef->size}));
         }
         clang::FileManager FM({"."}, overlayFS);
         FM.Retain();

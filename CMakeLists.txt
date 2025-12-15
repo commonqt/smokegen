@@ -21,6 +21,15 @@ include(AddLLVM)
 include_directories(${LLVM_INCLUDE_DIRS})
 add_definitions(${LLVM_DEFINITIONS})
 
+if(MSVC)
+    # Suppress noisy warnings from LLVM headers
+    add_compile_options(/wd4244 /wd4267 /wd4146 /wd4291 /wd4251)
+    # Remove -fno-rtti if present in LLVM_DEFINITIONS (it triggers D9002 warning in MSVC)
+    string(REPLACE "-fno-rtti" "" LLVM_DEFINITIONS "${LLVM_DEFINITIONS}")
+    # Do not force /GR- here; prefer the MSVC default RTTI behavior. If LLVM
+    # requires no-RTTI then rebuild LLVM with RTTI enabled instead.
+endif()
+
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 set(SMOKE_VERSION_MAJOR 3)
 set(SMOKE_VERSION_MINOR 0)
@@ -71,13 +80,15 @@ find_path(CLANG_HEADERS_PATH
         "${LLVM_INSTALL_PREFIX}/lib/clang/${LLVM_VERSION_MAJOR}/include/"
     NO_DEFAULT_PATH
 )
-file(GLOB BUILTINS_HEADERS "${CLANG_HEADERS_PATH}/*.h")
-foreach(BUILTIN_HEADER ${BUILTINS_HEADERS})
-    file(READ ${BUILTIN_HEADER} BINARY_DATA HEX)
-    string(REGEX REPLACE "(..)" "\\\\x\\1" BINARY_DATA "${BINARY_DATA}")
-    string(REPLACE "${CLANG_HEADERS_PATH}/" "/builtins/" FN "${BUILTIN_HEADER}"  )
-    string(APPEND EMBEDDED_DATA "  { \"${FN}\" , \"${BINARY_DATA}\" },\n")
-endforeach()
+# file(GLOB BUILTINS_HEADERS "${CLANG_HEADERS_PATH}/*.h")
+# foreach(BUILTIN_HEADER ${BUILTINS_HEADERS})
+#     file(READ ${BUILTIN_HEADER} BINARY_DATA HEX)
+#     string(REGEX REPLACE "(..)" "\\\\x\\1" BINARY_DATA "${BINARY_DATA}")
+#     string(REPLACE "${CLANG_HEADERS_PATH}/" "/builtins/" FN "${BUILTIN_HEADER}"  )
+#     string(APPEND EMBEDDED_DATA "  { \"${FN}\" , \"${BINARY_DATA}\" },\n")
+# endforeach()
+
+add_definitions(-DCLANG_HEADERS_PATH="${CLANG_HEADERS_PATH}")
 
 configure_file(embedded_includes.h.in embedded_includes.h)
 
@@ -124,15 +135,9 @@ set_target_properties(smokegen PROPERTIES COMPILE_DEFINITIONS __GENERATOR_BUILDI
 set(LLVM_REQUIRES_RTTI ON)
 llvm_update_compile_flags(smokegen)
 target_compile_features(smokegen PRIVATE cxx_nullptr)
-set_property(
-    SOURCE
-        astconsumer.cpp
-        frontendaction.cpp
-        main.cpp
-        ppcallbacks.cpp
-    APPEND
-    PROPERTY COMPILE_FLAGS -fno-rtti
-)
+## Do not force -fno-rtti per-source; respect the compiler defaults and
+## the LLVM build configuration. If LLVM requires no-RTTI, rebuild LLVM with
+## RTTI enabled or add targeted compile flags for compatible translation units.
 
 install(TARGETS smokegen LIBRARY DESTINATION ${LIB_INSTALL_DIR}
     ARCHIVE DESTINATION ${LIB_INSTALL_DIR}

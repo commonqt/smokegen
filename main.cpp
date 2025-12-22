@@ -23,7 +23,9 @@
 #include <QFileInfo>
 #include <QLibrary>
 
-#include <QtXml>
+#include <QDomDocument>
+#include <QDomElement>
+#include <QDomNode>
 
 #include <QtDebug>
 
@@ -33,7 +35,14 @@
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/VirtualFileSystem.h>
+#include <clang/Tooling/CompilationDatabase.h>
+#include <clang/Tooling/ArgumentsAdjusters.h>
 #include <clang/Tooling/Tooling.h>
+
+#include <clang/Basic/FileManager.h>
+#include <clang/Basic/FileSystemOptions.h>
+#include <clang/Frontend/TextDiagnosticPrinter.h>
+#include <clang/Basic/DiagnosticOptions.h>
 
 #include "options.h"
 #include "config.h"
@@ -79,10 +88,8 @@ int main(int argc, char **argv)
 
     ParserOptions::notToBeResolved << "FILE";
 
-    std::vector<std::string> Argv {
-        argv[0],
-        "-x", "c++",
-    };
+    // Store clang options separately to avoid lifetime issues
+    std::vector<std::string> clangOptions;
 
     for (int i = 1; i < args.count(); i++) {
         if ((args[i] == "-I" || args[i] == "-d" || args[i] == "-dm" ||
@@ -92,7 +99,9 @@ int main(int argc, char **argv)
             return EXIT_FAILURE;
         }
         if (args[i] == "-I") {
-            ParserOptions::includeDirs << QDir(args[++i]);
+            QString d = args[++i];
+            if (!d.isEmpty())
+                ParserOptions::includeDirs << QDir(d);
         } else if (args[i] == "-config") {
             configFile = QFileInfo(args[++i]);
         } else if (args[i] == "-d") {
@@ -115,7 +124,7 @@ int main(int argc, char **argv)
             addClangOptions = false;
             addHeaders = true;
         } else if (addClangOptions) {
-            Argv.push_back(args[i].toStdString());
+            clangOptions.push_back(args[i].toStdString());
         } else if (addHeaders) {
             ParserOptions::headerList << QFileInfo(args[i]);
         }
@@ -150,10 +159,14 @@ int main(int argc, char **argv)
                         continue;
                     }
                     if (elem.tagName() == "dir") {
-                        ParserOptions::includeDirs << QDir(elem.text());
+                        QString p = elem.text();
+                        if (!p.isEmpty())
+                            ParserOptions::includeDirs << QDir(p);
                     }
                     else if (elem.tagName() == "framework") {
-                        ParserOptions::frameworkDirs << QDir(elem.text());
+                        QString p = elem.text();
+                        if (!p.isEmpty())
+                            ParserOptions::frameworkDirs << QDir(p);
                     }
                     dir = dir.nextSibling();
                 }
@@ -207,9 +220,27 @@ int main(int argc, char **argv)
     foreach (QDir dir, ParserOptions::includeDirs) {
         if (!dir.exists()) {
             qWarning() << "include directory" << dir.path() << "doesn't exist";
-            ParserOptions::includeDirs.removeAll(dir);
         }
     }
+    // Filter out non-existent directories without modifying while iterating
+    QList<QDir> validDirs;
+    qDebug() << "DEBUG: Starting validation loop, initial count =" << ParserOptions::includeDirs.size();
+    foreach (QDir dir, ParserOptions::includeDirs) {
+        QString p = dir.path();
+        if (p.isEmpty()) {
+            qDebug() << "DEBUG: Skipping empty include dir entry";
+            continue;
+        }
+        if (dir.exists()) {
+            validDirs << dir;
+            qDebug() << "DEBUG: Added valid dir:" << p;
+        } else {
+            qDebug() << "DEBUG: Skipped invalid dir:" << p;
+        }
+    }
+    qDebug() << "DEBUG: Validation complete, validDirs count =" << validDirs.size();
+    ParserOptions::includeDirs = validDirs;
+    qDebug() << "DEBUG: Reassignment complete, ParserOptions::includeDirs count =" << ParserOptions::includeDirs.size();
     
     QStringList defines;
     if (ParserOptions::definesList.exists()) {
@@ -229,45 +260,96 @@ int main(int argc, char **argv)
     bool logErrors = log.open(QFile::WriteOnly | QFile::Truncate);
     QTextStream logOut(&log);
     
+    qDebug() << "Hello from smokegen!  AND IM UPDATED";
+
     foreach (QFileInfo file, ParserOptions::headerList) {
         qDebug() << "parsing" << file.absoluteFilePath();
 
+        // Build argument list for this file
+        std::vector<std::string> fileArgv;
+        fileArgv.push_back(std::string(app.applicationFilePath().toStdString()));
+        fileArgv.push_back("-x");
+        fileArgv.push_back("c++");
+        
         foreach (QDir dir, ParserOptions::includeDirs) {
-            Argv.push_back("-I" + dir.path().toStdString());
+            QString p = dir.path();
+            qDebug() << "adding include directory" << p;
+            if (p.isEmpty()) {
+                qDebug() << "DEBUG: Skipping empty include dir during argv build";
+                continue;
+            }
+            std::string dirPath = p.toStdString();
+            qDebug() << "DEBUG: Got dir path string OK";
+            std::string dirStr;
+            dirStr = "-I";
+            dirStr += dirPath;
+            qDebug() << "DEBUG: Constructed dirStr OK";
+            fileArgv.push_back(dirStr);
+            qDebug() << "DEBUG: Pushed dirStr to fileArgv OK";
         }
+        qDebug() << "DEBUG: Done with include directories";
         foreach (QDir dir, ParserOptions::frameworkDirs) {
-            Argv.push_back("-iframework");
-            Argv.push_back(dir.path().toStdString());
+            qDebug() << "DEBUG: Adding framework dir";
+            fileArgv.push_back("-iframework");
+            std::string fwkStr = dir.path().toStdString();
+            fileArgv.push_back(fwkStr);
         }
+        qDebug() << "DEBUG: Done with framework dirs";
+        
         foreach (QString define, defines) {
-            Argv.push_back("-D" + define.toStdString());
+            qDebug() << "DEBUG: Adding define";
+            std::string defStr = "-D" + define.toStdString();
+            fileArgv.push_back(defStr);
         }
-        Argv.push_back(file.absoluteFilePath().toStdString());
-        Argv.push_back("-I/builtins");
-        Argv.push_back("-fsyntax-only");
-
-        llvm::IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> overlayFS{new llvm::vfs::OverlayFileSystem(llvm::vfs::getRealFileSystem())};
-        llvm::IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> inMemoryFS{new llvm::vfs::InMemoryFileSystem()};
-        overlayFS->pushOverlay(inMemoryFS);
-
-        for (const EmbeddedFile* ef = EmbeddedFiles; ef && ef->filename; ++ef) {
-            inMemoryFS->addFile(ef->filename, 0, llvm::MemoryBuffer::getMemBuffer({ef->content, ef->size}));
+        qDebug() << "DEBUG: Done with defines";
+        
+        // Add clang options that were passed on command line
+        for (const auto& opt : clangOptions) {
+            qDebug() << "DEBUG: Adding clang option";
+            fileArgv.push_back(opt);
         }
-        clang::FileManager FM({"."}, overlayFS);
-        FM.Retain();
+        qDebug() << "DEBUG: Done with clang options";
+        
+        qDebug() << "DEBUG: About to add file path";
+        std::string fileStr = file.absoluteFilePath().toStdString();
+        fileArgv.push_back(fileStr);
+        qDebug() << "DEBUG: File path added";
+        
+        fileArgv.push_back("-I/builtins");
+        qDebug() << "DEBUG: Added -I/builtins";
+        
+        fileArgv.push_back("-fsyntax-only");
+        qDebug() << "DEBUG: Added -fsyntax-only";
 
-        clang::tooling::ToolInvocation inv(Argv, std::make_unique<SmokegenFrontendAction>(), &FM);
+        qDebug() << "DEBUG: About to create FileManager";
+
+        // Create FileManager with default filesystem
+        clang::FileSystemOptions fsOptions;
+        clang::FileManager FM(fsOptions, llvm::vfs::getRealFileSystem());
+
+        std::cerr << "DEBUG: FileManager created successfully\n" << std::flush;
+
+        // Skip embedded files for now - just pass -I/builtins on command line
+        // The crash appears to be in the embedded files loop itself
+
+        // Use the std::unique_ptr<FrontendAction> overload for LLVM 19
+        std::cerr << "DEBUG: About to create ToolInvocation\n" << std::flush;
+        clang::tooling::ToolInvocation inv(fileArgv, std::make_unique<SmokegenFrontendAction>(), &FM, std::make_shared<clang::PCHContainerOperations>());
+
+        std::cerr << "DEBUG: ToolInvocation created successfully\n" << std::flush;
+        qDebug() << "About to run inv";
 
         if (!inv.run()) {
+                qDebug() << "parsing of" << file.absoluteFilePath() << "failed";
             return 1;
         }
-
+        qDebug() << "parsing of" << file.absoluteFilePath() << "succeeded";
         // this has already been parsed because it was included by some header
         if (!logErrors)
             continue;
     }
     
     log.close();
-    
+    qDebug() << "generation log written to generator.log";
     return generate();
 }

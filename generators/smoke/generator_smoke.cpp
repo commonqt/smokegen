@@ -25,7 +25,9 @@
 #include <QString>
 #include <QtDebug>
 
-#include <QtXml>
+#include <QDomDocument>
+#include <QDomElement>
+#include <QDomNode>
 #include <QRegularExpression>
 
 #include <iostream>

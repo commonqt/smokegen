@@ -186,10 +186,16 @@ void SmokeDataFile::write()
 {
     qDebug("writing out smokedata.cpp [%s]", qPrintable(Options::module));
     QFile smokedata(Options::outputDir.filePath("smokedata.cpp"));
-    smokedata.open(QFile::ReadWrite | QFile::Truncate);
+    if (!smokedata.open(QFile::ReadWrite | QFile::Truncate)) {
+        qCritical("failed to open output file: %s", qPrintable(smokedata.fileName()));
+        return;
+    }
     QTextStream out(&smokedata);
     QFile argNames(Options::outputDir.filePath(QString("%1.argnames.txt").arg(Options::module)));
-    argNames.open(QFile::ReadWrite | QFile::Truncate);
+    if (!argNames.open(QFile::ReadWrite | QFile::Truncate)) {
+        qCritical("failed to open argnames file: %s", qPrintable(argNames.fileName()));
+        return;
+    }
     QTextStream outArgNames(&argNames);
     foreach (const QFileInfo& file, Options::headerList)
         out << "#include <" << file.fileName() << ">\n";

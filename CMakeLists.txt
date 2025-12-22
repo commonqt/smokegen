@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.11)
+cmake_minimum_required(VERSION 3.5)
 project(smokegenerator)
 
 if (NOT SMOKE_QT_VERSION)
@@ -21,15 +21,6 @@ include(AddLLVM)
 include_directories(${LLVM_INCLUDE_DIRS})
 add_definitions(${LLVM_DEFINITIONS})
 
-if(MSVC)
-    # Suppress noisy warnings from LLVM headers
-    add_compile_options(/wd4244 /wd4267 /wd4146 /wd4291 /wd4251)
-    # Remove -fno-rtti if present in LLVM_DEFINITIONS (it triggers D9002 warning in MSVC)
-    string(REPLACE "-fno-rtti" "" LLVM_DEFINITIONS "${LLVM_DEFINITIONS}")
-    # Do not force /GR- here; prefer the MSVC default RTTI behavior. If LLVM
-    # requires no-RTTI then rebuild LLVM with RTTI enabled instead.
-endif()
-
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 set(SMOKE_VERSION_MAJOR 3)
 set(SMOKE_VERSION_MINOR 0)
@@ -43,6 +34,8 @@ set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 if (NOT LIB_INSTALL_DIR)
     set (LIB_INSTALL_DIR ${CMAKE_INSTALL_PREFIX}/lib${LIB_SUFFIX})
 endif (NOT LIB_INSTALL_DIR)
+
+add_compile_definitions(LLVM_VERSION=${LLVM_VERSION_MAJOR})
 
 include_directories(${CMAKE_BINARY_DIR})
 
@@ -80,15 +73,34 @@ find_path(CLANG_HEADERS_PATH
         "${LLVM_INSTALL_PREFIX}/lib/clang/${LLVM_VERSION_MAJOR}/include/"
     NO_DEFAULT_PATH
 )
-# file(GLOB BUILTINS_HEADERS "${CLANG_HEADERS_PATH}/*.h")
-# foreach(BUILTIN_HEADER ${BUILTINS_HEADERS})
-#     file(READ ${BUILTIN_HEADER} BINARY_DATA HEX)
-#     string(REGEX REPLACE "(..)" "\\\\x\\1" BINARY_DATA "${BINARY_DATA}")
-#     string(REPLACE "${CLANG_HEADERS_PATH}/" "/builtins/" FN "${BUILTIN_HEADER}"  )
-#     string(APPEND EMBEDDED_DATA "  { \"${FN}\" , \"${BINARY_DATA}\" },\n")
-# endforeach()
-
-add_definitions(-DCLANG_HEADERS_PATH="${CLANG_HEADERS_PATH}")
+file(GLOB BUILTINS_HEADERS "${CLANG_HEADERS_PATH}/*.h")
+foreach(BUILTIN_HEADER ${BUILTINS_HEADERS})
+    file(READ ${BUILTIN_HEADER} BINARY_DATA HEX)
+    string(REGEX REPLACE "(..)" "\\\\x\\1" BINARY_DATA "${BINARY_DATA}")
+    string(REPLACE "${CLANG_HEADERS_PATH}/" "/builtins/" FN "${BUILTIN_HEADER}"  )
+    # Split large binary data into multiple smaller C string literals so MSVC
+    # does not produce "string too big" errors. We'll concatenate adjacent
+    # literals in the generated C++ source.
+    set(CHUNK_SIZE 4000)
+    string(LENGTH "${BINARY_DATA}" BINARY_LEN)
+    set(_parts)
+    set(_idx 0)
+    while(_idx LESS BINARY_LEN)
+        math(EXPR _rem "${BINARY_LEN} - ${_idx}")
+        if(_rem GREATER ${CHUNK_SIZE})
+            set(_len ${CHUNK_SIZE})
+        else()
+            set(_len ${_rem})
+        endif()
+        string(SUBSTRING "${BINARY_DATA}" ${_idx} ${_len} _chunk)
+        # Each chunk becomes a quoted string literal.
+        list(APPEND _parts "\"${_chunk}\"")
+        math(EXPR _idx "${_idx} + ${_len}")
+    endwhile()
+    # Join parts with a space so generated C++ has adjacent string literals.
+    string(REPLACE ";" " " _joined_parts "${_parts}")
+    string(APPEND EMBEDDED_DATA "  { \"${FN}\" , ${_joined_parts} },\n")
+endforeach()
 
 configure_file(embedded_includes.h.in embedded_includes.h)
 
@@ -135,9 +147,15 @@ set_target_properties(smokegen PROPERTIES COMPILE_DEFINITIONS __GENERATOR_BUILDI
 set(LLVM_REQUIRES_RTTI ON)
 llvm_update_compile_flags(smokegen)
 target_compile_features(smokegen PRIVATE cxx_nullptr)
-## Do not force -fno-rtti per-source; respect the compiler defaults and
-## the LLVM build configuration. If LLVM requires no-RTTI, rebuild LLVM with
-## RTTI enabled or add targeted compile flags for compatible translation units.
+set_property(
+    SOURCE
+        astconsumer.cpp
+        frontendaction.cpp
+        main.cpp
+        ppcallbacks.cpp
+    APPEND
+    PROPERTY COMPILE_FLAGS -fno-rtti
+)
 
 install(TARGETS smokegen LIBRARY DESTINATION ${LIB_INSTALL_DIR}
     ARCHIVE DESTINATION ${LIB_INSTALL_DIR}
@@ -154,7 +172,6 @@ if (WIN32)
         TARGET smokegen POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:${QT_VERSION}::Core>
-            $<TARGET_FILE:${QT_VERSION}::Xml>
             $<TARGET_FILE_DIR:smokegen>
     )
 
@@ -170,7 +187,6 @@ if (WIN32)
     # directory
     install(FILES
         $<TARGET_FILE:${QT_VERSION}::Core>
-        $<TARGET_FILE:${QT_VERSION}::Xml>
         DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
     )
 endif (WIN32)
@@ -185,3 +201,16 @@ add_subdirectory(smokebase)
 add_subdirectory(deptool)
 
 unset(SMOKE_QT_VERSION CACHE)
+
+# Taken from https://gitlab.kitware.com/cmake/community/-/wikis/FAQ#can-i-do-make-uninstall-with-cmake
+# uninstall target
+if(NOT TARGET uninstall)
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake_uninstall.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+    IMMEDIATE @ONLY)
+
+  add_custom_target(uninstall
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
+endif()
+

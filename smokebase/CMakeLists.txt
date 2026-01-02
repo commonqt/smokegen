@@ -6,6 +6,10 @@ include_directories (${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 add_library(smokebase SHARED smokebase.cpp)
 target_link_libraries(smokebase)
+
+# When building smokebase, define the symbol used by generator_export.h so
+# the library exports the generator symbols (GENERATOR_EXPORT -> export).
+target_compile_definitions(smokebase PRIVATE __GENERATOR_BUILDING)
 set_target_properties(smokebase PROPERTIES 
                                 VERSION ${SMOKE_VERSION}
                                 SOVERSION 3)

@@ -90,15 +90,29 @@ Access SmokegenASTVisitor::toAccess(clang::AccessSpecifier clangAccess) const {
 
 Parameter SmokegenASTVisitor::toParameter(const clang::ParmVarDecl* param) const {
     Type* paramType = registerType(param->getType());
+    if (!paramType) {
+        qWarning() << "Failed to register parameter type";
+        return Parameter();
+    }
     if (paramType->getTypedef()) {
-        paramType = typeFromTypedef(paramType->getTypedef(), paramType);
+        Type* resolved = typeFromTypedef(paramType->getTypedef(), paramType);
+        if (resolved) {
+            paramType = resolved;
+        }
     }
     Parameter parameter(
         QString::fromStdString(param->getNameAsString()),
         paramType
     );
 
-    if (const clang::Expr* defaultArgExpr = param->getDefaultArg()) {
+    const clang::Expr* defaultArgExpr = nullptr;
+    // Avoid calling getDefaultArg() when the default argument is not yet
+    // parsed or instantiated — calling getDefaultArg() then triggers a
+    // Clang assertion (see ParmVarDecl::getDefaultArg()).
+    if (!param->hasUnparsedDefaultArg() && !param->hasUninstantiatedDefaultArg()) {
+        defaultArgExpr = param->getDefaultArg();
+    }
+    if (defaultArgExpr) {
         std::string defaultArgStr;
         llvm::raw_string_ostream s(defaultArgStr);
         defaultArgExpr->printPretty(s, nullptr, pp());
@@ -129,7 +143,7 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
     clangClass = clangClass->hasDefinition() ? clangClass->getDefinition() : clangClass->getCanonicalDecl();
 
     QString qualifiedName = QString::fromStdString(clangClass->getQualifiedNameAsString());
-    if (classes.contains(qualifiedName) and not classes[qualifiedName].isForwardDecl()) {
+    if (classes.contains(qualifiedName) && !classes[qualifiedName].isForwardDecl()) {
         // We already have this class
         return &classes[qualifiedName];
     }
@@ -161,8 +175,9 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
     bool isForward = !clangClass->hasDefinition();
 
     Class localClass(name, nspace, parent, kind, isForward);
-    classes[qualifiedName] = localClass;
-    Class* klass = &classes[qualifiedName];
+    auto res = classes.insert(qualifiedName, localClass);
+    Class* klass = &res.value();
+    qDebug() << "registerClass:" << qualifiedName << "->" << reinterpret_cast<quintptr>(klass);
 
     klass->setAccess(toAccess(clangClass->getAccess()));
     klass->setFileName(QString(ploc.getFilename()));
@@ -198,8 +213,15 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
                 continue;
             }
             Type* returnType = registerType(getReturnTypeForFunction(method));
+            if (!returnType) {
+                qWarning() << "Failed to register return type for method" << QString::fromStdString(method->getNameAsString());
+                continue;
+            }
             if (returnType->getTypedef()) {
-                returnType = typeFromTypedef(returnType->getTypedef(), returnType);
+                Type* resolved = typeFromTypedef(returnType->getTypedef(), returnType);
+                if (resolved) {
+                    returnType = resolved;
+                }
             }
             Method newMethod = Method(
                 klass,
@@ -259,8 +281,14 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
             }
             const clang::DeclaratorDecl* declaratorDecl = clang::dyn_cast<clang::DeclaratorDecl>(decl);
             Type* fieldType = registerType(declaratorDecl->getType());
+            if (!fieldType) {
+                continue;
+            }
             if (fieldType->getTypedef()) {
-                fieldType = typeFromTypedef(fieldType->getTypedef(), fieldType);
+                Type* resolved = typeFromTypedef(fieldType->getTypedef(), fieldType);
+                if (resolved) {
+                    fieldType = resolved;
+                }
             }
             if (!fieldType->isValid()) {
                 continue;
@@ -309,8 +337,8 @@ Enum* SmokegenASTVisitor::registerEnum(const clang::EnumDecl* clangEnum) const {
         parent
     );
 
-    enums[qualifiedName] = localE;
-    Enum* e = &enums[qualifiedName];
+    auto res = enums.insert(qualifiedName, localE);
+    Enum* e = &res.value();
     e->setAccess(toAccess(clangEnum->getAccess()));
 
     if (parent) {
@@ -370,8 +398,8 @@ Function* SmokegenASTVisitor::registerFunction(const clang::FunctionDecl* clangF
         newFunction.setFileName(QString(ploc.getFilename()));
     }
 
-    functions[signature] = newFunction;
-    return &functions[signature];
+    auto res = functions.insert(signature, newFunction);
+    return &res.value();
 }
 
 Type* SmokegenASTVisitor::registerType(clang::QualType clangType) const {
@@ -537,11 +565,25 @@ Typedef* SmokegenASTVisitor::registerTypedef(const clang::TypedefNameDecl* clang
         parent
     );
 
-    typedefs[qualifiedName] = tdef;
-    return &typedefs[qualifiedName];
+    auto res = typedefs.insert(qualifiedName, tdef);
+    return &res.value();
 }
 
 Type* SmokegenASTVisitor::typeFromTypedef(const Typedef* tdef, const Type* sourceType) const {
+    // Safety checks
+    if (!tdef) {
+        return nullptr;
+    }
+    if (!sourceType) {
+        return nullptr;
+    }
+    
+    // Diagnostic: log the typedef and source type being resolved to aid debugging
+    #ifdef DEBUG_TYPEDEF_RESOLVE
+    qDebug() << "Resolving typedef:" << tdef->name();
+    qDebug() << "  sourceType:" << sourceType->toString();
+    #endif
+    
     Type targetType = tdef->resolve();
     targetType.setIsRef(sourceType->isRef());
     targetType.setIsConst(sourceType->isConst());
@@ -558,7 +600,11 @@ Type* SmokegenASTVisitor::typeFromTypedef(const Typedef* tdef, const Type* sourc
     for (int i = 0; i < sourceType->arrayDimensions(); i++) {
         targetType.setArrayLength(i, sourceType->arrayLength(i));
     }
-    return Type::registerType(targetType);
+    Type* registered = Type::registerType(targetType);
+    if (!registered) {
+        qWarning() << "Failed to register resolved typedef" << tdef->name();
+    }
+    return registered;
 }
 
 void SmokegenASTVisitor::addQPropertyAnnotations(const clang::CXXRecordDecl* D) const {

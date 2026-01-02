@@ -24,3 +24,7 @@ SmokegenFrontendAction::CreateASTConsumer(clang::CompilerInstance &CI, clang::St
         throw;
     }
 }
+
+void SmokegenFrontendAction::EndSourceFileAction() {
+    // Just log - don't try to exit or abort, let clang report errors normally
+}

@@ -84,7 +84,7 @@ QList<const Class*> Util::descendantsList(const Class* klass)
     QList<const Class*> ret;
     if (descendantsClassCache.contains(klass))
         return descendantsClassCache[klass];
-    for (QHash<QString, Class>::const_iterator iter = classes.constBegin(); iter != classes.constEnd(); iter++) {
+    for (auto iter = classes.constBegin(); iter != classes.constEnd(); ++iter) {
         if (superClassList(&iter.value()).contains(klass))
             ret << &iter.value();
     }
@@ -214,7 +214,7 @@ void Util::preparse(QSet<Type*> *usedTypes, QSet<const Class*> *superClasses, co
     }
 
     // add all functions as methods to a class called 'QGlobalSpace' or a class that represents a namespace
-    for (QHash<QString, Function>::const_iterator it = functions.constBegin(); it != functions.constEnd(); it++) {
+    for (auto it = functions.constBegin(); it != functions.constEnd(); ++it) {
         const Function& fn = it.value();
         
         QString fnString = fn.toString();
@@ -266,7 +266,7 @@ void Util::preparse(QSet<Type*> *usedTypes, QSet<const Class*> *superClasses, co
     }
 
     // all enums that don't have a parent are put under QGlobalSpace, too
-    for (QHash<QString, Enum>::iterator it = enums.begin(); it != enums.end(); it++) {
+    for (auto it = enums.begin(); it != enums.end(); ++it) {
         Enum& e = it.value();
         if (!e.parent()) {
             Class* parent = &globalSpace;

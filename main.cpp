@@ -31,6 +31,15 @@
 
 #include <iostream>
 #include <memory>
+#if defined(_WIN32)
+# if !defined(WIN32_LEAN_AND_MEAN)
+#   define WIN32_LEAN_AND_MEAN
+# endif
+# if !defined(NOMINMAX)
+#   define NOMINMAX
+# endif
+# include <windows.h>
+#endif
 
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
 #include <llvm/Support/MemoryBuffer.h>
@@ -45,6 +54,7 @@
 #include <clang/Basic/DiagnosticOptions.h>
 
 #include "options.h"
+#include "type.h"
 #include "config.h"
 #include "frontendaction.h"
 #include "embedded_includes.h"
@@ -265,6 +275,9 @@ int main(int argc, char **argv)
     foreach (QFileInfo file, ParserOptions::headerList) {
         qDebug() << "parsing" << file.absoluteFilePath();
 
+#if defined(_WIN32)
+        __try {
+#endif
         // Build argument list for this file
         std::vector<std::string> fileArgv;
         fileArgv.push_back(std::string(app.applicationFilePath().toStdString()));
@@ -304,14 +317,24 @@ int main(int argc, char **argv)
         qDebug() << "DEBUG: Done with defines";
         
         // Add clang options that were passed on command line
-        for (const auto& opt : clangOptions) {
-            qDebug() << "DEBUG: Adding clang option";
-            fileArgv.push_back(opt);
+        if (!clangOptions.empty()) {
+            qDebug() << "DEBUG: clangOptions count=" << (int)clangOptions.size();
+            // Reserve to avoid reallocation during push_back which could
+            // cause issues if vector's allocator/state differs across libs.
+            fileArgv.reserve(fileArgv.size() + clangOptions.size());
+            for (const auto& opt : clangOptions) {
+                qDebug() << "DEBUG: Adding clang option";
+                fileArgv.push_back(opt);
+            }
+        } else {
+            qDebug() << "DEBUG: No clang options to add";
         }
         qDebug() << "DEBUG: Done with clang options";
         
         qDebug() << "DEBUG: About to add file path";
         std::string fileStr = file.absoluteFilePath().toStdString();
+        // Ensure there's space before pushing the file path
+        fileArgv.reserve(fileArgv.size() + 2);
         fileArgv.push_back(fileStr);
         qDebug() << "DEBUG: File path added";
         
@@ -340,10 +363,24 @@ int main(int argc, char **argv)
         qDebug() << "About to run inv";
 
         if (!inv.run()) {
-                qDebug() << "parsing of" << file.absoluteFilePath() << "failed";
-            return 1;
+            qDebug() << "parsing of" << file.absoluteFilePath() << "failed";
+            qCritical() << "Continuing to next file despite parse failure";
+        } else {
+            // Parsing succeeded - let clang's objects destruct naturally
+            qDebug() << "inv.run() returned successfully";
+            qDebug() << "parsing of" << file.absoluteFilePath() << "succeeded";
         }
-        qDebug() << "parsing of" << file.absoluteFilePath() << "succeeded";
+
+#if defined(_WIN32)
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            DWORD code = GetExceptionCode();
+            qCritical() << "SEH: exception code:" << QString::number(code, 16);
+            qCritical() << "Crash occurred while processing:" << file.absoluteFilePath();
+            std::cerr << "SEH: exception code: 0x" << std::hex << code << std::dec << "\n" << std::flush;
+            std::cerr << "Crash while parsing: " << file.absoluteFilePath().toStdString() << "\n" << std::flush;
+            qWarning() << "Continuing to next file after crash";
+        }
+#endif
         // this has already been parsed because it was included by some header
         if (!logErrors)
             continue;

@@ -2,8 +2,8 @@
 #include "ppcallbacks.h"
 
 void SmokegenASTConsumer::Initialize(clang::ASTContext &ctx) {
-    ppCallbacks = new SmokegenPPCallbacks(ci.getPreprocessor());
-    ci.getPreprocessor().addPPCallbacks(std::unique_ptr<SmokegenPPCallbacks>(ppCallbacks));
+    auto ppCallbacks = std::make_unique<SmokegenPPCallbacks>(ci.getPreprocessor());
+    ci.getPreprocessor().addPPCallbacks(std::move(ppCallbacks));
 }
 
 bool SmokegenASTConsumer::HandleTopLevelDecl(clang::DeclGroupRef DR) {

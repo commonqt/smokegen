@@ -187,7 +187,12 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
         }
         if (!dynamicDispatch && !func) {
             // dynamic dispatch not wanted, call with 'this->Foo::method()'
-            out << className << "::";
+            // But for QGlobalSpace, use global namespace instead
+            if (className == "QGlobalSpace") {
+                out << "::";
+            } else {
+                out << className << "::";
+            }
         } else if (func) {
             if (!func->nameSpace().isEmpty())
               if (!meth.name().contains("qt_getEnumName")  && !meth.name().contains("qt_getEnumMetaObject"))
@@ -532,7 +537,11 @@ void SmokeClassFiles::writeClass(QTextStream& out, const Class* klass, const QSt
     
     int xcall_index = 1;
 
-    foreach (const Method& meth, klass->methods()) {
+    // Use direct index iteration to keep stable addresses for method pointers,
+    // so Util::globalFunctionMap lookups find the right Function metadata.
+    const auto& mlist = klass->methods();
+    for (int mi = 0; mi < mlist.size(); ++mi) {
+        const Method& meth = mlist[mi];
         if (&meth == destructor)
             continue;
 

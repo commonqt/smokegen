@@ -23,6 +23,8 @@
 #include <QStringList>
 #include <QHash>
 #include <QtDebug>
+#include <memory>
+#include <QList>
 
 #include "generator_export.h"
 
@@ -33,12 +35,122 @@ class GlobalVar;
 class Function;
 class Type;
 
-extern GENERATOR_EXPORT QHash<QString, Class> classes;
-extern GENERATOR_EXPORT QHash<QString, Typedef> typedefs;
-extern GENERATOR_EXPORT QHash<QString, Enum> enums;
-extern GENERATOR_EXPORT QHash<QString, Function> functions;
-extern GENERATOR_EXPORT QHash<QString, GlobalVar> globals;
-extern GENERATOR_EXPORT QHash<QString, Type> types;
+template<typename T>
+class StableHashMap {
+public:
+    using Storage = QHash<QString, std::shared_ptr<T>>;
+    using RawIterator = typename Storage::iterator;
+    using RawConstIterator = typename Storage::const_iterator;
+
+    class InternalIterator {
+    public:
+        InternalIterator() {}
+        InternalIterator(const RawIterator& it) : m_it(it) {}
+        bool operator!=(const InternalIterator& other) const { return m_it != other.m_it; }
+        bool operator==(const InternalIterator& other) const { return m_it == other.m_it; }
+        InternalIterator& operator++() { ++m_it; return *this; }
+        QString key() const { return m_it.key(); }
+        T& value() const { return *m_it.value(); }
+    private:
+        RawIterator m_it;
+    };
+
+    class InternalConstIterator {
+    public:
+        InternalConstIterator() {}
+        InternalConstIterator(const RawConstIterator& it) : m_it(it) {}
+        bool operator!=(const InternalConstIterator& other) const { return m_it != other.m_it; }
+        bool operator==(const InternalConstIterator& other) const { return m_it == other.m_it; }
+        InternalConstIterator& operator++() { ++m_it; return *this; }
+        QString key() const { return m_it.key(); }
+        const T& value() const { return *m_it.value(); }
+    private:
+        RawConstIterator m_it;
+    };
+
+    struct InsertResult {
+        InternalIterator it;
+        bool inserted;
+        T& value() { return it.value(); }
+    };
+
+    StableHashMap() = default;
+    ~StableHashMap() = default; // unique_ptr will clean up
+
+    InsertResult insert(const QString& key, const T& value) {
+        if (m_storage.contains(key)) {
+            *m_storage[key] = value;
+            RawIterator rawIt = m_storage.find(key);
+            InternalIterator it(rawIt);
+            return InsertResult{it, false};
+        }
+        m_storage.insert(key, std::make_shared<T>(value));
+        RawIterator rawIt = m_storage.find(key);
+        InternalIterator it(rawIt);
+        return InsertResult{it, true};
+    }
+
+    bool contains(const QString& key) const { return m_storage.contains(key); }
+
+    T& operator[](const QString& key) {
+        if (!m_storage.contains(key)) {
+            m_storage.insert(key, std::make_shared<T>());
+        }
+        return *m_storage[key];
+    }
+
+    const T& operator[](const QString& key) const { return *m_storage.value(key); }
+
+    InternalIterator find(const QString& key) { return InternalIterator(m_storage.find(key)); }
+    InternalConstIterator find(const QString& key) const { return InternalConstIterator(m_storage.find(key)); }
+
+    InternalIterator begin() { return InternalIterator(m_storage.begin()); }
+    InternalIterator end() { return InternalIterator(m_storage.end()); }
+    InternalConstIterator begin() const { return InternalConstIterator(m_storage.constBegin()); }
+    InternalConstIterator end() const { return InternalConstIterator(m_storage.constEnd()); }
+    InternalConstIterator constBegin() const { return InternalConstIterator(m_storage.constBegin()); }
+    InternalConstIterator constEnd() const { return InternalConstIterator(m_storage.constEnd()); }
+
+    QList<T> values() const {
+        QList<T> vals;
+        for (auto it = m_storage.constBegin(); it != m_storage.constEnd(); ++it) {
+            if (it.value()) vals.append(*it.value());
+        }
+        return vals;
+    }
+
+    QStringList keys() const {
+        QStringList k;
+        for (auto it = m_storage.constBegin(); it != m_storage.constEnd(); ++it) {
+            k.append(it.key());
+        }
+        return k;
+    }
+
+    bool containsPointer(const T* p) const {
+        if (!p) return false;
+        for (auto it = m_storage.constBegin(); it != m_storage.constEnd(); ++it) {
+            auto sp = it.value();
+            if (!sp) continue;
+            const T& v = *sp;
+            if (&v == p) return true;
+        }
+        return false;
+    }
+
+private:
+    Storage m_storage;
+};
+
+extern GENERATOR_EXPORT StableHashMap<Class> classes;
+extern GENERATOR_EXPORT StableHashMap<Typedef> typedefs;
+extern GENERATOR_EXPORT StableHashMap<Enum> enums;
+extern GENERATOR_EXPORT StableHashMap<Function> functions;
+extern GENERATOR_EXPORT StableHashMap<GlobalVar> globals;
+extern GENERATOR_EXPORT StableHashMap<Type> types;
+
+// Runtime validation helper: scans registries and prints inconsistencies when enabled
+void validateAll();
 
 class Method;
 class Field;
@@ -483,8 +595,8 @@ public:
 #ifndef Q_OS_WIN
     {
         QString typeString = type.toString();
-        QHash<QString, Type>::iterator iter = types.insert(typeString, type);
-        return &iter.value();
+        auto res = types.insert(typeString, type);
+        return &res.value();
     }
 #else
     ;

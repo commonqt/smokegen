@@ -11,6 +11,8 @@ class SmokegenFrontendAction : public clang::ASTFrontendAction {
 public:
     std::unique_ptr<clang::ASTConsumer>
     CreateASTConsumer(clang::CompilerInstance &CI, clang::StringRef file) override;
+    
+    void EndSourceFileAction() override;
 };
 
 #endif

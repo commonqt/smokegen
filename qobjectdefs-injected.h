@@ -3,6 +3,13 @@ static const char Injected[] = R"-(
 #define Q_MOC_OUTPUT_REVISION 68
 #endif
 
+// Define offsetof in a way that works in constexpr contexts with clang
+// Qt6's qplugin.h uses offsetof in constexpr which clang rejects
+#ifdef __clang__
+#undef offsetof
+#define offsetof(type, member) __builtin_offsetof(type, member)
+#endif
+
 // The following macros can be defined by tools that understand Qt
 // to have the information from the macro.
 #ifndef QT_ANNOTATE_CLASS
@@ -48,6 +55,7 @@ static const char Injected[] = R"-(
 #ifndef Q_REVISION
 # define Q_REVISION(...)
 #endif
+#define Q_DECL_HIDDEN_STATIC_METACALL
 #define Q_OVERRIDE(text) QT_ANNOTATE_CLASS(qt_override, text)
 #define QDOC_PROPERTY(text) QT_ANNOTATE_CLASS(qt_qdoc_property, text)
 #define Q_ENUMS(x) QT_ANNOTATE_CLASS(qt_enums, x)

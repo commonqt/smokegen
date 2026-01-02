@@ -25,7 +25,6 @@ public:
 private:
     SmokegenASTVisitor Visitor;
     clang::CompilerInstance &ci;
-    SmokegenPPCallbacks *ppCallbacks;
 };
 
 #endif

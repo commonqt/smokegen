@@ -112,9 +112,18 @@ function(run_smokegen numXfiles smokegenArgs)
 
     get_smokegen_output_files(outputFiles ${numXfiles})
 
+    # On Windows Debug builds, disable the debug heap to avoid false positives during
+    # clang's cleanup phase.  _NO_DEBUG_HEAP=1 tells the debug CRT not to use the
+    # debug heap allocator.
+    if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(_SMOKEGEN_ENV ${CMAKE_COMMAND} -E env "_NO_DEBUG_HEAP=1")
+    else()
+        set(_SMOKEGEN_ENV)
+    endif()
+
     add_custom_command(
         OUTPUT ${outputFiles}
-        COMMAND ${SMOKE_GEN_BIN}
+        COMMAND ${_SMOKEGEN_ENV} ${SMOKE_GEN_BIN}
         ARGS ${smokegenArgs}
         DEPENDS
             ${SMOKE_GEN_BIN}

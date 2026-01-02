@@ -19,12 +19,12 @@
 #include "type.h"
 #include "options.h"
 
-QHash<QString, Class> classes;
-QHash<QString, Typedef> typedefs;
-QHash<QString, Enum> enums;
-QHash<QString, Function> functions;
-QHash<QString, GlobalVar> globals;
-QHash<QString, Type> types;
+StableHashMap<Class> classes;
+StableHashMap<Typedef> typedefs;
+StableHashMap<Enum> enums;
+StableHashMap<Function> functions;
+StableHashMap<GlobalVar> globals;
+StableHashMap<Type> types;
 
 QString BasicTypeDeclaration::toString() const
 {
@@ -97,8 +97,8 @@ const Type* Type::Void = Type::registerType(Type("void"));
 Type* Type::registerType(const Type& type)
 {
     QString typeString = type.toString();
-    QHash<QString, Type>::iterator iter = types.insert(typeString, type);
-    return &iter.value();
+    auto res = types.insert(typeString, type);
+    return &res.value();
 }
 #endif
 
@@ -109,15 +109,33 @@ Type Typedef::resolve() const {
     // not pretty, but safe. 'this' (without const) will never be returned or modified from here on.
     const Type tmp(const_cast<Typedef*>(this));
     const Type* t = &tmp;
+    // Track visited typedef pointers to detect cycles without calling Type::name()
+    QSet<const Typedef*> visited;
+    while (t && t->getTypedef()) {
+        const Typedef* innerTdef = t->getTypedef();
+        if (!innerTdef) break;
 
-    QString name;
-    while (t->getTypedef() && t->name() != name && !ParserOptions::notToBeResolved.contains(t->getTypedef()->name())) {
+        // stop resolving if this typedef's name is in the ignore-list
+        if (ParserOptions::notToBeResolved.contains(innerTdef->name())) break;
+
+        // detect cycles
+        if (visited.contains(innerTdef)) break;
+        visited.insert(innerTdef);
+
         if (!isRef) isRef = t->isRef();
         if (!isConst) isConst = t->isConst();
         if (!isVolatile) isVolatile = t->isVolatile();
-        name = t->name();
-        t = t->getTypedef()->type();
-        for (int i = t->pointerDepth() - 1; i >= 0; i--) {
+
+        // Advance to the underlying type; guard against null
+        const Type* next = innerTdef->type();
+        if (!next) {
+            break;
+        }
+        t = next;
+
+        // Collect pointer constness safely
+        int pd = t->pointerDepth();
+        for (int i = pd - 1; i >= 0; i--) {
             pointerDepth.prepend(t->isConstPointer(i));
         }
     }
@@ -203,4 +221,29 @@ QString Type::toString(const QString& fnPtrName) const
     }
     // the compiler would misinterpret ">>" as the operator - replace it with "> >"
     return ret.replace(">>", "> >");
+}
+
+void validateAll()
+{
+    if (!qEnvironmentVariableIsSet("SMOKETRACE_VALIDATE")) return;
+    qDebug() << "validateAll: scanning registries...";
+
+    // Check typedefs
+    int tcount = 0;
+    for (auto it = typedefs.begin(); it != typedefs.end(); ++it) {
+        ++tcount;
+        const Typedef& td = it.value();
+        if (td.name().isEmpty()) qDebug() << "  typedef with empty name at key:" << it.key();
+        if (!td.type()) qDebug() << "  typedef" << td.name() << "has null type pointer";
+    }
+    qDebug() << "  typedefs:" << tcount;
+
+    // Check types
+    int tycount = 0;
+    for (auto it = types.begin(); it != types.end(); ++it) {
+        ++tycount;
+        const Type& ty = it.value();
+        if (ty.name().isEmpty()) qDebug() << "  type with empty name at key:" << it.key();
+    }
+    qDebug() << "  types:" << tycount;
 }

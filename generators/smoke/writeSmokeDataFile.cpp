@@ -39,7 +39,7 @@ SmokeDataFile::SmokeDataFile()
 {
     qDebug("preparing SMOKE data [%s]", qPrintable(Options::module));
     
-    for (QHash<QString, Class>::const_iterator iter = ::classes.constBegin(); iter != ::classes.constEnd(); iter++) {
+    for (auto iter = ::classes.constBegin(); iter != ::classes.constEnd(); ++iter) {
         if (Options::classList.contains(iter.key()) && !iter.value().isForwardDecl() && !iter.value().isTemplate()) {
             classIndex[iter.key()] = 1;
         }
@@ -72,7 +72,7 @@ SmokeDataFile::SmokeDataFile()
     }
 
     // if a class is used somewhere but not listed in the class list, mark it external
-    for (QHash<QString, Class>::iterator iter = ::classes.begin(); iter != ::classes.end(); iter++) {
+    for (auto iter = ::classes.begin(); iter != ::classes.end(); ++iter) {
         if (iter.value().isTemplate() || Options::voidpTypes.contains(iter.key()))
             continue;
         
@@ -319,7 +319,7 @@ void SmokeDataFile::write()
     // xenum functions
     out << "// These are the xenum functions for manipulating enum pointers\n";
     QSet<QString> enumClassesHandled;
-    for (QHash<QString, Enum>::const_iterator it = enums.constBegin(); it != enums.constEnd(); it++) {
+    for (auto it = enums.constBegin(); it != enums.constEnd(); ++it) {
         if (!it.value().isValid())
             continue;
         

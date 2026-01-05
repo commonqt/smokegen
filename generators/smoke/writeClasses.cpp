@@ -381,8 +381,12 @@ void SmokeClassFiles::generateEnumMemberCall(QTextStream& out, const QString& pa
     out << "    static void x_" << index << "(Smoke::Stack x) {\n"
         << "        x[0].s_enum = static_cast<long>(";
     
+    // Use parentName for the enclosing class/namespace, then className for the enum type
+    if (!parentName.isEmpty())
+        out << parentName << "::";
+    
     if (!className.isEmpty())
-        out  << className << "::";
+        out << className << "::";
     
     out << member << ");\n"
         << "    }\n";

@@ -4,6 +4,10 @@ find_package(${QT_VERSION}Core REQUIRED)
 include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/.. )
 
 add_executable(smokedeptool main.cpp)
+
+# Clear LLVM's -nostartfiles/-nostdlib flags that may be inherited
+set_target_properties(smokedeptool PROPERTIES LINK_FLAGS "")
+
 target_link_libraries(smokedeptool smokebase ${QT_VERSION}::Core)
 
 if (WIN32)

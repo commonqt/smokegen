@@ -5,6 +5,11 @@ include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/.. )
 
 add_executable(smokeapi main.cpp)
 
+# Clear LLVM's -nostartfiles/-nostdlib flags that may be inherited
+set_target_properties(smokeapi PROPERTIES
+    LINK_FLAGS ""
+)
+
 if (WIN32)
 	# Realign the stack, for compatibility with an older ABI.
 	if(CMAKE_COMPILER_IS_GNUCXX)

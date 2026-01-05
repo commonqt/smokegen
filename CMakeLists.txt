@@ -164,6 +164,20 @@ set_property(
     PROPERTY COMPILE_FLAGS -fno-rtti
 )
 
+# Ensure exceptions are enabled for smokegen sources. Some toolchains
+# (or superproject settings) may disable exceptions globally; smokegen
+# relies on exceptions in a few places (try/catch). Explicitly enable
+# exceptions for the target when using Clang or MSVC.
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    if (MSVC)
+        # MSVC uses /EHsc for standard exception handling
+        target_compile_options(smokegen PRIVATE /EHsc)
+    else()
+        # For Clang/GCC toolchains, ensure exceptions are enabled
+        target_compile_options(smokegen PRIVATE -fexceptions)
+    endif()
+endif()
+
 if(MSVC)
     # MSVC can hit the object file section limit when translating large
     # sources; enable /bigobj to increase the limit and avoid C1128.

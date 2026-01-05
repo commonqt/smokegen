@@ -41,7 +41,7 @@ SmokeDataFile::SmokeDataFile()
 {
     qDebug("preparing SMOKE data [%s]", qPrintable(Options::module));
 
-    for (QHash<QString, Class>::const_iterator iter = ::classes.constBegin(); iter != ::classes.constEnd(); iter++) {
+    for (auto iter = ::classes.constBegin(); iter != ::classes.constEnd(); ++iter) {
         if (Options::classList.contains(iter.key()) && !iter.value().isForwardDecl() && !iter.value().isTemplate()) {
             classIndex[iter.key()] = 1;
         }

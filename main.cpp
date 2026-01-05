@@ -39,6 +39,16 @@
 #   define NOMINMAX
 # endif
 # include <windows.h>
+# include <crtdbg.h>
+
+// Custom assertion handler to prevent dialog boxes
+int customAssertHandler(int reportType, char* message, int* returnValue) {
+    // Log the assertion to stderr instead of showing a dialog
+    std::cerr << "CRT Assertion: " << message << std::endl;
+    // Return 1 to tell CRT to continue execution (suppress dialog)
+    *returnValue = 0;
+    return 1; // TRUE means we handled it
+}
 #endif
 
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
@@ -83,6 +93,7 @@ int main(int argc, char **argv)
 {
     try
     {
+        
         if (argc == 1) {
             showUsage();
             return EXIT_SUCCESS;
@@ -267,20 +278,28 @@ int main(int argc, char **argv)
         Argv.push_back("-I/builtins");
         Argv.push_back("-fsyntax-only");
 
-        clang::FileManager FM({"."});
-        FM.Retain();
-
-        clang::tooling::ToolInvocation inv(Argv, std::make_unique<SmokegenFrontendAction>(), &FM);
-
+        // Create an overlay file system with embedded files. Allocate on the heap
+        // and intentionally leak to avoid destructor-induced heap corruption.
+        auto RealFS = llvm::vfs::getRealFileSystem();
+        auto *InMemFS = new llvm::vfs::InMemoryFileSystem;
         const EmbeddedFile* f = EmbeddedFiles;
         while (f->filename) {
-            inv.mapVirtualFile(f->filename, {f->content, f->size});
+            InMemFS->addFile(f->filename, 0, llvm::MemoryBuffer::getMemBuffer({f->content, f->size}, "", false));
             ++f;
         }
 
-        if (!inv.run()) {
+        auto *OverlayFS = new llvm::vfs::OverlayFileSystem(RealFS);
+        OverlayFS->pushOverlay(llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem>(InMemFS));
+
+        auto *FM = new clang::FileManager({"."}, llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem>(OverlayFS));
+
+        auto inv = std::make_unique<clang::tooling::ToolInvocation>(Argv, std::make_unique<SmokegenFrontendAction>(), FM);
+
+        if (!inv->run()) {
             return 1;
         }
+
+        inv.release(); // leak to skip teardown
 
         // this has already been parsed because it was included by some header
         if (!logErrors)
@@ -289,10 +308,20 @@ int main(int argc, char **argv)
     
     log.close();
     
-    return generate();
+    // Call the generator to produce output files
+    int result = generate();
+    
+    // Use std::_Exit to skip destructors and avoid heap corruption during LLVM cleanup.
+    // This is a common pattern in LLVM-based tools where:
+    // 1. LLVM is statically linked, creating separate heaps in each module
+    // 2. Cleanup is expensive and unnecessary for a short-lived tool
+    // 3. All important work (file generation) is already complete
+    // Proper fix: rebuild LLVM with -DBUILD_SHARED_LIBS=ON
+    std::_Exit(result);
     }
     catch (const std::exception& e)
     {
-        std::cout << "An error occured: " <<  e.what();
+        std::cout << "An error occured: " <<  e.what() << std::endl;
+        std::_Exit(1);
     }
 }

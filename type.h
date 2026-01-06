@@ -439,6 +439,14 @@ public:
     void setHasExceptionSpec(bool hasSpec) { m_hasExceptionSpec = hasSpec; }
     bool hasExceptionSpec() const { return m_hasExceptionSpec; }
 
+    // Field accessor support - stores the Field this method is an accessor for
+    void setAccessorField(const Field* field) { m_accessorField = field; }
+    const Field* accessorField() const { return m_accessorField; }
+
+    // Global function support - stores the Function this method wraps (for namespace functions)
+    void setGlobalFunction(const Function* func) { m_globalFunction = func; }
+    const Function* globalFunction() const { return m_globalFunction; }
+
     void appendExceptionType(const Type& type) { m_exceptionTypes.append(type); }
     const QList<Type>& exceptionTypes() const { return m_exceptionTypes; }
 
@@ -454,6 +462,8 @@ protected:
     bool m_isSignal;
     bool m_isSlot;
     bool m_isDeleted;
+    const Field* m_accessorField = nullptr;
+    const Function* m_globalFunction = nullptr;
     QList<Type> m_exceptionTypes;
     QStringList m_remainingValues;
 };

@@ -261,7 +261,8 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
             }
 
             if (const clang::CXXConstructorDecl* ctor = clang::dyn_cast<clang::CXXConstructorDecl>(method)) {
-                // if (!ctor->isDeleted() && clangClass->isAbstract()) continue;
+                // Skip constructors for abstract classes - they can't be instantiated
+                if (!ctor->isDeleted() && clangClass->isAbstract()) continue;
                 newMethod.setIsConstructor(true);
                 if (ctor->getExplicitSpecifier().isExplicit()) {
                     newMethod.setFlag(Member::Explicit);
@@ -375,9 +376,14 @@ Enum* SmokegenASTVisitor::registerEnum(const clang::EnumDecl* clangEnum) const {
 
     for (const clang::EnumConstantDecl* enumVal : clangEnum->enumerators()) {
         
+        // Don't prepend enum name if the enum has a parent (class or namespace)
+        // The code generator will add the full path during generation
+        // Only prepend for standalone scoped enums at global scope
+        bool shouldPrependName = clangEnum->isScoped() && !parent && nspace.isEmpty();
+        
         EnumMember member(
             e,
-            QString::fromStdString(clangEnum->isScoped() ? name.toStdString() + "::" + enumVal->getNameAsString() : enumVal->getNameAsString())
+            QString::fromStdString(shouldPrependName ? name.toStdString() + "::" + enumVal->getNameAsString() : enumVal->getNameAsString())
         );
         // The existing parser doesn't set the values for enums.
         //if (const clang::Expr* initExpr = enumVal->getInitExpr()) {

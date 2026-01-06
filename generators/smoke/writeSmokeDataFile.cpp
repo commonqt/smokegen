@@ -142,7 +142,6 @@ QString SmokeDataFile::getTypeFlags(const Type *t, int *classIdx)
             *classIdx = classIndex.value(t->getClass()->toString(), 0);
         }
     } else if (t->isIntegral() && t->name() != "void" && t->pointerDepth() == 0 && !t->isRef()) {
-        flags += "|Smoke::t_";
         QString typeName = t->name();
 
         // replace the unsigned stuff, look the type up in Util::typeMap and if
@@ -157,7 +156,14 @@ QString SmokeDataFile::getTypeFlags(const Type *t, int *classIdx)
         if (_unsigned)
             typeName.prepend('u');
 
-        flags += typeName;
+        // If the type name contains template or namespace characters, it's not a simple
+        // integral type name - fall back to t_voidp (e.g., std::conditional_t<...>)
+        if (typeName.contains('<') || typeName.contains('>') || typeName.contains("::")) {
+            flags += "|Smoke::t_voidp";
+        } else {
+            flags += "|Smoke::t_";
+            flags += typeName;
+        }
     } else if (t->getEnum()) {
         flags += "|Smoke::t_enum";
         if (t->getEnum()->parent()) {
@@ -589,7 +595,7 @@ void SmokeDataFile::write()
                 meth.parameters()[0].type()->isConst() &&
                 meth.parameters()[0].type()->getClass() == klass)
                 flags += "|Smoke::mf_copyctor";
-            if (Util::fieldAccessors.contains(&meth))
+            if (meth.accessorField())
                 flags += "|Smoke::mf_attribute";
             if (meth.isQPropertyAccessor())
                 flags += "|Smoke::mf_property";

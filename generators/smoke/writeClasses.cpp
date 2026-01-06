@@ -100,6 +100,11 @@ void SmokeClassFiles::write(const QList<QString>& keys)
 #endif
 
         fileOut << "\n#include <windows.h>\n";
+        // Ensure module-wide helper includes (full type definitions) are available in each x_*.cpp
+        // QtCore keeps a curated header to pull in forward-declared types like QModelIndex.
+        if (Options::module.startsWith("qt6core")) {
+            fileOut << "\n#include <qtcore_includes.h>\n";
+        }
         // ... and the #includes
         QList<QString> sortedIncludes = includes.values();
         std::sort(sortedIncludes.begin(), sortedIncludes.end());
@@ -108,11 +113,16 @@ void SmokeClassFiles::write(const QList<QString>& keys)
                 continue;
             if (str.startsWith("/builtins/"))
                 str.remove(0, 10);
-            //Avoid error : redefinition by inclusion of qsharedpointer_impl.h
-            if (!str.contains("qsharedpointer_impl.h"))
-	      //ignore .lxx files (Open CASCADE)
-	      if (!str.contains(".lxx"))
-		fileOut << "#include <" << str << ">\n";
+            // Avoid error: redefinition by inclusion of _impl.h files that lack self-contained guards
+            // These files are designed to be included only via their parent headers
+            if (str.contains("qsharedpointer_impl.h") ||
+                str.contains("qobjectdefs_impl.h") ||
+                str.contains("qfunctionaltools_impl.h"))
+                continue;
+            // ignore .lxx files (Open CASCADE)
+            if (str.contains(".lxx"))
+                continue;
+            fileOut << "#include <" << str << ">\n";
         }
 
         //Missing qrenderapi.h
@@ -162,7 +172,7 @@ QString SmokeClassFiles::generateMethodBody(const QString& indent, const QString
     if (meth.isConstructor()) {
         out << smokeClassName << "* xret = new " << smokeClassName << "(";
     } else {
-        const Function* func = Util::globalFunctionMap[&meth];
+        const Function* func = meth.globalFunction();
         if (func)
             includes.insert(func->fileName());
 
@@ -510,8 +520,8 @@ void SmokeClassFiles::writeClass(QTextStream& out, const Class* klass, const QSt
 
     int xcall_index = 1;
 
-    // Use direct index iteration to keep stable addresses for method pointers,
-    // so Util::globalFunctionMap lookups find the right Function metadata.
+    // Use direct index iteration for stable method iteration.
+    // Note: Method stores Function* and Field* directly to avoid pointer invalidation issues.
     const auto& mlist = klass->methods();
     for (int mi = 0; mi < mlist.size(); ++mi) {
         const Method& meth = mlist[mi];
@@ -531,13 +541,14 @@ void SmokeClassFiles::writeClass(QTextStream& out, const Class* klass, const QSt
                   << obj
                   << "x_" << xcall_index << QString("(%1args);\tbreak;\n")
                      .arg((!(meth.flags() & Method::Static) && privateDestructor) ? "xself, " : "");
-        if (Util::fieldAccessors.contains(&meth)) {
-            // accessor method?
-            const Field* field = Util::fieldAccessors[&meth];
+        if (meth.accessorField()) {
+            // accessor method - use the field's owning class for proper qualification
+            const Field* field = meth.accessorField();
+            QString fieldClassName = field->getClass()->toString();
             if (meth.name().startsWith("set")) {
-                generateSetAccessor(out, className, *field, meth.parameters()[0].type(), xcall_index);
+                generateSetAccessor(out, fieldClassName, *field, meth.parameters()[0].type(), xcall_index);
             } else {
-                generateGetAccessor(out, className, *field, meth.type(), xcall_index);
+                generateGetAccessor(out, fieldClassName, *field, meth.type(), xcall_index);
             }
         } else {
             generateMethod(out, className, smokeClassName, meth, xcall_index, includes, privateDestructor);

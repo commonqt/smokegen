@@ -117,6 +117,15 @@ static Smoke* loadSmokeModule(QString moduleName) {
     // first, try <libdir>/moduleName/libsmokemoduleName
     lib.setFileName(Options::libDir.filePath(moduleName + '/' + libName));
 
+    // For Qt6 modules like "qt6core", also try folder without "6" prefix (e.g., "qtcore")
+    if (!lib.load()) {
+        QString folderName = moduleName;
+        if (folderName.startsWith(QLatin1String("qt6"))) {
+            folderName = QLatin1String("qt") + folderName.mid(3);  // "qt6core" -> "qtcore"
+            lib.setFileName(Options::libDir.filePath(folderName + '/' + libName));
+        }
+    }
+
     // then <libdir>/libsmokemoduleName
     if (!lib.load()) {
         lib.setFileName(Options::libDir.filePath(libName));

@@ -711,6 +711,12 @@ QString Util::stackItemField(const Type* type)
         return "s_uint";
     }
 
+    // Check for complex template types with angle brackets that can't be used as field names
+    QString typeName = type->name();
+    if (typeName.contains('<') && typeName.contains('>')) {
+        return "s_class";
+    }
+
     if (type->pointerDepth() > 0 || type->isRef() || type->isFunctionPointer() || type->isArray() || Options::voidpTypes.contains(type->name())
         || (!type->isIntegral() && !type->getEnum()))
     {
@@ -720,7 +726,6 @@ QString Util::stackItemField(const Type* type)
     if (type->getEnum())
         return "s_enum";
 
-    QString typeName = type->name();
     // replace the unsigned stuff, look the type up in Util::typeMap and if
     // necessary, add a 'u' for unsigned types at the beginning again
     bool _unsigned = false;
@@ -747,6 +752,14 @@ QString Util::assignmentString(const Type* type, const QString& var)
     } else if (type->isRef()) {
         return "(void*)&" + var;
     } else if (type->isIntegral() && !Options::voidpTypes.contains(type->name())) {
+        // Check if this is a complex template type that stackItemField treats as s_class
+        QString typeName = type->name();
+        if (typeName.contains('<') && typeName.contains('>')) {
+            // Complex template type - needs heap allocation
+            QString ret = "(void*)new " + type->toString();
+            ret += '(' + var + ')';
+            return ret;
+        }
         return var;
     } else if (type->getEnum()) {
         // Cast enum return values to long for Qt6 compatibility

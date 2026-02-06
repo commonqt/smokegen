@@ -376,12 +376,22 @@ void SmokeClassFiles::generateSetAccessor(QTextStream& out, const QString& class
       out << "        " << "std::memcpy(" << fieldName << ", x[1].s_class, " << siz
           << "*sizeof(" <<  list1.at(0) << "));\n";
     } else {
-      out << "        " << fieldName << " = ";
-      if (unionField == "s_class" && type->pointerDepth() == 0) {
-	out << '*';
-	cast += '*';
-      }
-      out << '(' << cast << ')' << "x[1]." << unionField << ";\n";
+    // Special-case: avoid copying QExplicitlySharedDataPointer<...Private> by value
+    // which would require the definition of the private type. Instead assign
+    // the enclosing public object (e.g. assign QHostAddress) when we detect
+    // an explicitly shared data pointer to a Private type.
+    if (unionField == "s_class" && type->pointerDepth() == 0
+        && cast.contains("QExplicitlySharedDataPointer<") && cast.contains("Private")) {
+        // Generate assignment via the public class operator= to avoid referencing the private type.
+        out << "        this->" << className << "::operator=(*(const " << className << "*)x[1]." << unionField << ");\n";
+    } else {
+        out << "        " << fieldName << " = ";
+        if (unionField == "s_class" && type->pointerDepth() == 0) {
+            out << '*';
+            cast += '*';
+        }
+        out << '(' << cast << ')' << "x[1]." << unionField << ";\n";
+    }
     }
     out << "    }\n";
 }

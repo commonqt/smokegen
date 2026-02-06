@@ -210,7 +210,13 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
             methods.append(method);
 
         for (const clang::CXXMethodDecl* method : methods) {
-            if (method->isImplicit()) {
+            // Don't skip implicit constructors: some classes (e.g. QItemSelection)
+            // have an implicit or defaulted zero-argument constructor that
+            // should be exposed to bindings. Previously we skipped all
+            // implicit methods which omitted such ctors. Keep skipping
+            // implicit methods except for constructors which we want to
+            // consider.
+            if (method->isImplicit() && !clang::isa<clang::CXXConstructorDecl>(method)) {
                 continue;
             }
 
@@ -375,12 +381,12 @@ Enum* SmokegenASTVisitor::registerEnum(const clang::EnumDecl* clangEnum) const {
     }
 
     for (const clang::EnumConstantDecl* enumVal : clangEnum->enumerators()) {
-        
+
         // Don't prepend enum name if the enum has a parent (class or namespace)
         // The code generator will add the full path during generation
         // Only prepend for standalone scoped enums at global scope
         bool shouldPrependName = clangEnum->isScoped() && !parent && nspace.isEmpty();
-        
+
         EnumMember member(
             e,
             QString::fromStdString(shouldPrependName ? name.toStdString() + "::" + enumVal->getNameAsString() : enumVal->getNameAsString())
@@ -612,13 +618,13 @@ Type* SmokegenASTVisitor::typeFromTypedef(const Typedef* tdef, const Type* sourc
     if (!sourceType) {
         return nullptr;
     }
-    
+
     // Diagnostic: log the typedef and source type being resolved to aid debugging
     #ifdef DEBUG_TYPEDEF_RESOLVE
     qDebug() << "Resolving typedef:" << tdef->name();
     qDebug() << "  sourceType:" << sourceType->toString();
     #endif
-    
+
     Type targetType = tdef->resolve();
     targetType.setIsRef(sourceType->isRef());
     targetType.setIsConst(sourceType->isConst());

@@ -233,12 +233,12 @@ public:
 	t_uint,
 	t_long,
 	t_ulong,
-        t_llong,
-        t_ullong,
 	t_float,
 	t_double,
         t_enum,
         t_class,
+        t_llong,
+        t_ullong,
 	t_last		// number of pre-defined types
     };
 

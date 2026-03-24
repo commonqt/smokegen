@@ -1,10 +1,13 @@
 #include <regex>
+#include <iostream>
 
 #include <clang/AST/ASTContext.h>
 #include <clang/Basic/Version.h>
 
 #include "astvisitor.h"
 #include "defaultargvisitor.h"
+
+#include <QRegularExpression>
 
 bool SmokegenASTVisitor::VisitCXXRecordDecl(clang::CXXRecordDecl *D) {
     registerClass(D);
@@ -29,7 +32,6 @@ bool SmokegenASTVisitor::VisitFunctionDecl(clang::FunctionDecl *D) {
     if (D->isDependentContext() || D->getTemplateSpecializationInfo()) {
         return true;
     }
-
 
     // Skip functions that use va_args
     for (const clang::ParmVarDecl* parm : D->parameters()) {
@@ -88,15 +90,22 @@ Access SmokegenASTVisitor::toAccess(clang::AccessSpecifier clangAccess) const {
 
 Parameter SmokegenASTVisitor::toParameter(const clang::ParmVarDecl* param) const {
     Type* paramType = registerType(param->getType());
+    if (!paramType) {
+        qWarning() << "Failed to register parameter type";
+        return Parameter();
+    }
     if (paramType->getTypedef()) {
-        paramType = typeFromTypedef(paramType->getTypedef(), paramType);
+        Type* resolved = typeFromTypedef(paramType->getTypedef(), paramType);
+        if (resolved) {
+            paramType = resolved;
+        }
     }
     Parameter parameter(
         QString::fromStdString(param->getNameAsString()),
         paramType
     );
 
-    if (const clang::Expr* defaultArgExpr = param->getDefaultArg()) {
+    if (const clang::Expr* defaultArgExpr = (param->hasUninstantiatedDefaultArg() ? param->getUninstantiatedDefaultArg() : param->getDefaultArg())) {
         std::string defaultArgStr;
         llvm::raw_string_ostream s(defaultArgStr);
         defaultArgExpr->printPretty(s, nullptr, pp());
@@ -107,7 +116,7 @@ Parameter SmokegenASTVisitor::toParameter(const clang::ParmVarDecl* param) const
         std::string resolved = argVisitor.toString(defaultArgExpr);
         if (!resolved.empty()) {
             QString resolvedQString = QString::fromStdString(resolved);
-            resolvedQString = resolvedQString.replace(QRegExp("^=[\\s]*"), "");
+            resolvedQString = resolvedQString.replace(QRegularExpression("^=[\\s]*"), "");
             parameter.setDefaultValue(resolvedQString);
         }
     }
@@ -127,12 +136,13 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
     clangClass = clangClass->hasDefinition() ? clangClass->getDefinition() : clangClass->getCanonicalDecl();
 
     QString qualifiedName = QString::fromStdString(clangClass->getQualifiedNameAsString());
-    if (classes.contains(qualifiedName) and not classes[qualifiedName].isForwardDecl()) {
+    if (classes.contains(qualifiedName) && !classes[qualifiedName].isForwardDecl()) {
         // We already have this class
         return &classes[qualifiedName];
     }
 
     QString name = QString::fromStdString(clangClass->getNameAsString());
+
     QString nspace;
     Class* parent = nullptr;
     if (const auto clangParent = clang::dyn_cast<clang::NamespaceDecl>(clangClass->getParent())) {
@@ -143,13 +153,13 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
     }
     Class::Kind kind;
     switch (clangClass->getTagKind()) {
-        case clang::TTK_Class:
+        case clang::TagTypeKind::Class:
             kind = Class::Kind_Class;
             break;
-        case clang::TTK_Struct:
+        case clang::TagTypeKind::Struct:
             kind = Class::Kind_Struct;
             break;
-        case clang::TTK_Union:
+        case clang::TagTypeKind::Union:
             kind = Class::Kind_Union;
             break;
         default:
@@ -159,8 +169,9 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
     bool isForward = !clangClass->hasDefinition();
 
     Class localClass(name, nspace, parent, kind, isForward);
-    classes[qualifiedName] = localClass;
-    Class* klass = &classes[qualifiedName];
+    auto res = classes.insert(qualifiedName, localClass);
+    Class* klass = &res.value();
+    qDebug() << "registerClass:" << qualifiedName << "->" << reinterpret_cast<quintptr>(klass);
 
     klass->setAccess(toAccess(clangClass->getAccess()));
     klass->setFileName(QString(ploc.getFilename()));
@@ -169,35 +180,57 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
         klass->setIsTemplate(true);
     }
 
-    if (!isForward && !clangClass->getTypeForDecl()->isDependentType()) {
-        addQPropertyAnnotations(clangClass);
+    if (!isForward) {
+        if (!clangClass->getTypeForDecl()->isDependentType()) {
+            addQPropertyAnnotations(clangClass);
 
-        // Set base classes
-        for (const clang::CXXBaseSpecifier& base : clangClass->bases()) {
-            const clang::CXXRecordDecl* baseRecordDecl = base.getType()->getAsCXXRecordDecl();
+            // Set base classes
+            for (const clang::CXXBaseSpecifier& base : clangClass->bases()) {
+                const clang::CXXRecordDecl* baseRecordDecl = base.getType()->getAsCXXRecordDecl();
 
-            if (!baseRecordDecl) {
-                // Ignore template specializations
-                continue;
+                if (!baseRecordDecl) {
+                    // Ignore template specializations
+                    continue;
+                }
+
+                Class::BaseClassSpecifier baseClass = Class::BaseClassSpecifier{
+                    &classes[QString::fromStdString(baseRecordDecl->getQualifiedNameAsString())],
+                    toAccess(base.getAccessSpecifier()),
+                    base.isVirtual()
+                };
+
+                klass->appendBaseClass(baseClass);
             }
-
-            Class::BaseClassSpecifier baseClass = Class::BaseClassSpecifier {
-                &classes[QString::fromStdString(baseRecordDecl->getQualifiedNameAsString())],
-                toAccess(base.getAccessSpecifier()),
-                base.isVirtual()
-            };
-
-            klass->appendBaseClass(baseClass);
         }
 
         // Set methods
-        for (const clang::CXXMethodDecl* method : clangClass->methods()) {
-            if (method->isImplicit()) {
+        QList<const clang::CXXMethodDecl*> methods;
+
+        for (auto method : clangClass->methods())
+            methods.append(method);
+
+        for (const clang::CXXMethodDecl* method : methods) {
+            // Don't skip implicit constructors: some classes (e.g. QItemSelection)
+            // have an implicit or defaulted zero-argument constructor that
+            // should be exposed to bindings. Previously we skipped all
+            // implicit methods which omitted such ctors. Keep skipping
+            // implicit methods except for constructors which we want to
+            // consider.
+            if (method->isImplicit() && !clang::isa<clang::CXXConstructorDecl>(method)) {
                 continue;
             }
-            Type* returnType = registerType(getReturnTypeForFunction(method));
+
+            clang::QualType clangReturnType = getReturnTypeForFunction(method);
+
+            if (klass->isTemplate() && clang::dyn_cast<clang::TemplateSpecializationType>(clangReturnType))
+                continue;
+
+            Type* returnType = registerType(clangReturnType);
             if (returnType->getTypedef()) {
-                returnType = typeFromTypedef(returnType->getTypedef(), returnType);
+                Type* resolved = typeFromTypedef(returnType->getTypedef(), returnType);
+                if (resolved) {
+                    returnType = resolved;
+                }
             }
             Method newMethod = Method(
                 klass,
@@ -205,6 +238,16 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
                 returnType,
                 method->isDeleted() ? Access_private : toAccess(method->getAccess())
             );
+
+
+            newMethod.setIsDeleted(method->isDeleted());
+
+
+            // Avoid collecting methods we do not know how to call it.
+            // We need to collect some information about template classes but... take it easy...
+            if (klass->isTemplate() && newMethod.access() != Access_private)
+                continue;
+
             for (auto attr_it = method->specific_attr_begin<clang::AnnotateAttr>();
               attr_it != method->specific_attr_end<clang::AnnotateAttr>();
               ++attr_it) {
@@ -222,9 +265,12 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
             if (const clang::CXXConversionDecl* conversion = clang::dyn_cast<clang::CXXConversionDecl>(method)) {
                 newMethod.setName(QString::fromStdString("operator " + conversion->getConversionType().getAsString(pp())));
             }
+
             if (const clang::CXXConstructorDecl* ctor = clang::dyn_cast<clang::CXXConstructorDecl>(method)) {
+                // Skip constructors for abstract classes - they can't be instantiated
+                if (!ctor->isDeleted() && clangClass->isAbstract()) continue;
                 newMethod.setIsConstructor(true);
-                if (ctor->isExplicit()) {
+                if (ctor->getExplicitSpecifier().isExplicit()) {
                     newMethod.setFlag(Member::Explicit);
                 }
             }
@@ -234,7 +280,7 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
             newMethod.setIsConst(method->isConst());
             if (method->isVirtual()) {
                 newMethod.setFlag(Member::Virtual);
-                if (method->isPure()) {
+                if (method->isPureVirtual()) {
                     newMethod.setFlag(Member::PureVirtual);
                 }
             }
@@ -242,11 +288,27 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
                 newMethod.setFlag(Member::Static);
             }
 
+            bool foundNotCompatibleParameter = false;
             for (const clang::ParmVarDecl* param : method->parameters()) {
+                if (klass->isTemplate() && clang::dyn_cast<clang::TemplateTypeParmType>(param->getType()))
+                {
+                    foundNotCompatibleParameter = true;
+                    break;
+                }
+
+                // TODO handle RValue on functions xpto(type &&s)
+                if (clang::dyn_cast<clang::RValueReferenceType>(param->getType()))
+                {
+                    foundNotCompatibleParameter = true;
+                    break;
+                }
                 newMethod.appendParameter(toParameter(param));
             }
 
-            klass->appendMethod(newMethod);
+            if (foundNotCompatibleParameter)
+                continue;
+
+            klass->appendMethod(newMethod, true);
         }
 
         for (const clang::Decl* decl : clangClass->decls()) {
@@ -258,7 +320,10 @@ Class* SmokegenASTVisitor::registerClass(const clang::CXXRecordDecl* clangClass)
             const clang::DeclaratorDecl* declaratorDecl = clang::dyn_cast<clang::DeclaratorDecl>(decl);
             Type* fieldType = registerType(declaratorDecl->getType());
             if (fieldType->getTypedef()) {
-                fieldType = typeFromTypedef(fieldType->getTypedef(), fieldType);
+                Type* resolved = typeFromTypedef(fieldType->getTypedef(), fieldType);
+                if (resolved) {
+                    fieldType = resolved;
+                }
             }
             if (!fieldType->isValid()) {
                 continue;
@@ -307,8 +372,8 @@ Enum* SmokegenASTVisitor::registerEnum(const clang::EnumDecl* clangEnum) const {
         parent
     );
 
-    enums[qualifiedName] = localE;
-    Enum* e = &enums[qualifiedName];
+    auto res = enums.insert(qualifiedName, localE);
+    Enum* e = &res.value();
     e->setAccess(toAccess(clangEnum->getAccess()));
 
     if (parent) {
@@ -316,9 +381,15 @@ Enum* SmokegenASTVisitor::registerEnum(const clang::EnumDecl* clangEnum) const {
     }
 
     for (const clang::EnumConstantDecl* enumVal : clangEnum->enumerators()) {
+
+        // Don't prepend enum name if the enum has a parent (class or namespace)
+        // The code generator will add the full path during generation
+        // Only prepend for standalone scoped enums at global scope
+        bool shouldPrependName = clangEnum->isScoped() && !parent && nspace.isEmpty();
+
         EnumMember member(
             e,
-            QString::fromStdString(enumVal->getNameAsString())
+            QString::fromStdString(shouldPrependName ? name.toStdString() + "::" + enumVal->getNameAsString() : enumVal->getNameAsString())
         );
         // The existing parser doesn't set the values for enums.
         //if (const clang::Expr* initExpr = enumVal->getInitExpr()) {
@@ -368,12 +439,11 @@ Function* SmokegenASTVisitor::registerFunction(const clang::FunctionDecl* clangF
         newFunction.setFileName(QString(ploc.getFilename()));
     }
 
-    functions[signature] = newFunction;
-    return &functions[signature];
+    auto res = functions.insert(signature, newFunction);
+    return &res.value();
 }
 
 Type* SmokegenASTVisitor::registerType(clang::QualType clangType) const {
-    clang::QualType orig = clang::QualType(clangType);
 
     Type type;
 
@@ -460,7 +530,7 @@ Type* SmokegenASTVisitor::registerType(clang::QualType clangType) const {
         const auto templateSpecializationDecl = clang::dyn_cast<clang::ClassTemplateSpecializationDecl>(clangClass);
         if (templateSpecializationDecl) {
             const auto & args = templateSpecializationDecl->getTemplateArgs();
-            for (int i=0; i < args.size(); ++i) {
+            for (size_t i=0; i < args.size(); ++i) {
                 switch (args[i].getKind()) {
                     case clang::TemplateArgument::Integral:
                     {
@@ -536,11 +606,25 @@ Typedef* SmokegenASTVisitor::registerTypedef(const clang::TypedefNameDecl* clang
         parent
     );
 
-    typedefs[qualifiedName] = tdef;
-    return &typedefs[qualifiedName];
+    auto res = typedefs.insert(qualifiedName, tdef);
+    return &res.value();
 }
 
 Type* SmokegenASTVisitor::typeFromTypedef(const Typedef* tdef, const Type* sourceType) const {
+    // Safety checks
+    if (!tdef) {
+        return nullptr;
+    }
+    if (!sourceType) {
+        return nullptr;
+    }
+
+    // Diagnostic: log the typedef and source type being resolved to aid debugging
+    #ifdef DEBUG_TYPEDEF_RESOLVE
+    qDebug() << "Resolving typedef:" << tdef->name();
+    qDebug() << "  sourceType:" << sourceType->toString();
+    #endif
+
     Type targetType = tdef->resolve();
     targetType.setIsRef(sourceType->isRef());
     targetType.setIsConst(sourceType->isConst());
@@ -557,7 +641,11 @@ Type* SmokegenASTVisitor::typeFromTypedef(const Typedef* tdef, const Type* sourc
     for (int i = 0; i < sourceType->arrayDimensions(); i++) {
         targetType.setArrayLength(i, sourceType->arrayLength(i));
     }
-    return Type::registerType(targetType);
+    Type* registered = Type::registerType(targetType);
+    if (!registered) {
+        qWarning() << "Failed to register resolved typedef" << tdef->name();
+    }
+    return registered;
 }
 
 void SmokegenASTVisitor::addQPropertyAnnotations(const clang::CXXRecordDecl* D) const {
@@ -566,7 +654,10 @@ void SmokegenASTVisitor::addQPropertyAnnotations(const clang::CXXRecordDecl* D) 
         if (clang::StaticAssertDecl *S = llvm::dyn_cast<clang::StaticAssertDecl>(d) ) {
             if (auto *E = llvm::dyn_cast<clang::UnaryExprOrTypeTraitExpr>(S->getAssertExpr())) {
                 if (clang::ParenExpr *PE = llvm::dyn_cast<clang::ParenExpr>(E->getArgumentExpr())) {
-                    llvm::StringRef key = S->getMessage()->getString();
+                    llvm::StringRef key;
+                    if (const auto *msg = llvm::dyn_cast<clang::StringLiteral>(S->getMessage())) {
+                        key = msg->getString();
+                    }
                     if (key == "qt_property") {
                         clang::StringLiteral *Val = llvm::dyn_cast<clang::StringLiteral>(PE->getSubExpr());
 
@@ -579,7 +670,7 @@ void SmokegenASTVisitor::addQPropertyAnnotations(const clang::CXXRecordDecl* D) 
                             auto lookup = D->lookup(Name);
                             for (clang::NamedDecl* namedDecl : lookup) {
                                 if (clang::CXXMethodDecl* method = clang::dyn_cast<clang::CXXMethodDecl>(namedDecl)) {
-                                    auto annotate = clang::AnnotateAttr::Create(*ctx, llvm::StringRef("qt_property"), nullptr, 0, clang::SourceRange());
+                                    auto annotate = clang::AnnotateAttr::Create(*ctx, "qt_property", nullptr, 0);
                                     method->addAttr(annotate);
                                 }
                             }
@@ -591,7 +682,7 @@ void SmokegenASTVisitor::addQPropertyAnnotations(const clang::CXXRecordDecl* D) 
                             auto lookup = D->lookup(Name);
                             for (clang::NamedDecl* namedDecl : lookup) {
                                 if (clang::CXXMethodDecl* method = clang::dyn_cast<clang::CXXMethodDecl>(namedDecl)) {
-                                    auto annotate = clang::AnnotateAttr::Create(*ctx, llvm::StringRef("qt_property"), nullptr, 0, clang::SourceRange());
+                                    auto annotate = clang::AnnotateAttr::Create(*ctx, "qt_property", nullptr, 0);
                                     method->addAttr(annotate);
                                 }
                             }

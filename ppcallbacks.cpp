@@ -1,4 +1,5 @@
 #include "ppcallbacks.h"
+#include "clang/Basic/FileManager.h"
 
 void SmokegenPPCallbacks::InjectQObjectDefs(clang::SourceLocation Loc) {
     #include "qobjectdefs-injected.h"
@@ -10,13 +11,13 @@ void SmokegenPPCallbacks::InjectQObjectDefs(clang::SourceLocation Loc) {
 void SmokegenPPCallbacks::FileChanged(clang::SourceLocation Loc, FileChangeReason Reason,
         clang::SrcMgr::CharacteristicKind FileType, clang::FileID PrevFID) {
 
-    auto F = pp.getSourceManager().getFileEntryForID(PrevFID);
+    auto F = pp.getSourceManager().getFileEntryRefForID(PrevFID);
     if (!F)
         return;
 
     llvm::StringRef name = F->getName();
 
-    if (name.endswith("qobjectdefs.h")) {
+    if (name.ends_with("qobjectdefs.h")) {
         InjectQObjectDefs(Loc);
     }
 }

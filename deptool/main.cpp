@@ -21,13 +21,14 @@
 #include <QtDebug>
 
 #include <smoke.h>
+#include <QRegularExpression>
 
 using InitSmokeFn = void (*)();
 
 Smoke* loadSmokeModule(QFileInfo file) {
     QLibrary lib(file.filePath());
 
-    QString moduleName = file.baseName().replace(QRegExp("^libsmoke"), QString());
+    QString moduleName = file.baseName().replace(QRegularExpression("^libsmoke"), QString());
 
     QString init_name = "init_" + moduleName + "_Smoke";
     InitSmokeFn init = (InitSmokeFn) lib.resolve(init_name.toLatin1());
@@ -94,34 +95,34 @@ int main(int argc, char** argv)
 
     for (QHash<Smoke*, QSet<Smoke*> >::iterator iter = parents.begin(); iter != parents.end(); iter++) {
         // remove dependencies that are already covered by other parent modules
-        for (Smoke* smoke : iter.value()) {
+        foreach (Smoke* smoke, iter.value()) {
             iter.value() -= parents[smoke];
         }
     }
 
     QTextStream qOut(stdout);
     QList<Smoke*> smokeModules = parents.keys();
-    qSort(smokeModules.begin(), smokeModules.end(), smokeModuleLessThan);
+    std::sort(smokeModules.begin(), smokeModules.end(), smokeModuleLessThan);
     foreach(Smoke* smoke, smokeModules) {
         qDebug() << "parent modules for" << smoke->moduleName();
 
-        QList<Smoke*> sortedList = parents[smoke].toList();
-        qSort(sortedList.begin(), sortedList.end(), smokeModuleLessThan);
+        QList<Smoke*> sortedList = parents[smoke].values();
+        std::sort(sortedList.begin(), sortedList.end(), smokeModuleLessThan);
 
         if (generateXml) {
-            qOut << "    <parentModules>" << endl;
-            for (Smoke* parent : sortedList) {
-                qOut << "        <module>" << parent->moduleName() << "</module>" << endl;
+            qOut << "    <parentModules>" << Qt::endl;
+            foreach (Smoke* parent, sortedList) {
+                qOut << "        <module>" << parent->moduleName() << "</module>" << Qt::endl;
             }
-            qOut << "    </parentModules>" << endl;
+            qOut << "    </parentModules>" << Qt::endl;
         } else {
-            for (Smoke* parent : sortedList) {
-                qOut << "  * " << parent->moduleName() << endl;
+            foreach (Smoke* parent, sortedList) {
+                qOut << "  * " << parent->moduleName() << Qt::endl;
             }
         }
     }
 
-    for (Smoke* smoke : parents.keys())
+    foreach (Smoke* smoke, parents.keys())
         delete smoke;
 
     return 0;

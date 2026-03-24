@@ -7,8 +7,13 @@ set(generator_smoke_SRC
     helpers.cpp)
 
 add_library(generator_smoke MODULE ${generator_smoke_SRC})
-target_link_libraries(generator_smoke smokebase Qt5::Core Qt5::Xml smokegen)
+target_link_libraries(generator_smoke smokebase ${QT_VERSION}::Core ${QT_VERSION}::Xml smokegen)
 set_target_properties(generator_smoke PROPERTIES PREFIX "")
+
+if(MSVC)
+	# Increase object file limit for MSVC builds of generator_smoke
+	target_compile_options(generator_smoke PRIVATE /bigobj)
+endif()
 
 if (WIN32)
 	# Realign the stack, for compatibility with an older ABI.

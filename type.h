@@ -23,6 +23,8 @@
 #include <QStringList>
 #include <QHash>
 #include <QtDebug>
+#include <memory>
+#include <QList>
 
 #include "generator_export.h"
 
@@ -33,12 +35,122 @@ class GlobalVar;
 class Function;
 class Type;
 
-extern GENERATOR_EXPORT QHash<QString, Class> classes;
-extern GENERATOR_EXPORT QHash<QString, Typedef> typedefs;
-extern GENERATOR_EXPORT QHash<QString, Enum> enums;
-extern GENERATOR_EXPORT QHash<QString, Function> functions;
-extern GENERATOR_EXPORT QHash<QString, GlobalVar> globals;
-extern GENERATOR_EXPORT QHash<QString, Type> types;
+template<typename T>
+class StableHashMap {
+public:
+    using Storage = QHash<QString, std::shared_ptr<T>>;
+    using RawIterator = typename Storage::iterator;
+    using RawConstIterator = typename Storage::const_iterator;
+
+    class InternalIterator {
+    public:
+        InternalIterator() {}
+        InternalIterator(const RawIterator& it) : m_it(it) {}
+        bool operator!=(const InternalIterator& other) const { return m_it != other.m_it; }
+        bool operator==(const InternalIterator& other) const { return m_it == other.m_it; }
+        InternalIterator& operator++() { ++m_it; return *this; }
+        QString key() const { return m_it.key(); }
+        T& value() const { return *m_it.value(); }
+    private:
+        RawIterator m_it;
+    };
+
+    class InternalConstIterator {
+    public:
+        InternalConstIterator() {}
+        InternalConstIterator(const RawConstIterator& it) : m_it(it) {}
+        bool operator!=(const InternalConstIterator& other) const { return m_it != other.m_it; }
+        bool operator==(const InternalConstIterator& other) const { return m_it == other.m_it; }
+        InternalConstIterator& operator++() { ++m_it; return *this; }
+        QString key() const { return m_it.key(); }
+        const T& value() const { return *m_it.value(); }
+    private:
+        RawConstIterator m_it;
+    };
+
+    struct InsertResult {
+        InternalIterator it;
+        bool inserted;
+        T& value() { return it.value(); }
+    };
+
+    StableHashMap() = default;
+    ~StableHashMap() = default; // unique_ptr will clean up
+
+    InsertResult insert(const QString& key, const T& value) {
+        if (m_storage.contains(key)) {
+            *m_storage[key] = value;
+            RawIterator rawIt = m_storage.find(key);
+            InternalIterator it(rawIt);
+            return InsertResult{it, false};
+        }
+        m_storage.insert(key, std::make_shared<T>(value));
+        RawIterator rawIt = m_storage.find(key);
+        InternalIterator it(rawIt);
+        return InsertResult{it, true};
+    }
+
+    bool contains(const QString& key) const { return m_storage.contains(key); }
+
+    T& operator[](const QString& key) {
+        if (!m_storage.contains(key)) {
+            m_storage.insert(key, std::make_shared<T>());
+        }
+        return *m_storage[key];
+    }
+
+    const T& operator[](const QString& key) const { return *m_storage.value(key); }
+
+    InternalIterator find(const QString& key) { return InternalIterator(m_storage.find(key)); }
+    InternalConstIterator find(const QString& key) const { return InternalConstIterator(m_storage.find(key)); }
+
+    InternalIterator begin() { return InternalIterator(m_storage.begin()); }
+    InternalIterator end() { return InternalIterator(m_storage.end()); }
+    InternalConstIterator begin() const { return InternalConstIterator(m_storage.constBegin()); }
+    InternalConstIterator end() const { return InternalConstIterator(m_storage.constEnd()); }
+    InternalConstIterator constBegin() const { return InternalConstIterator(m_storage.constBegin()); }
+    InternalConstIterator constEnd() const { return InternalConstIterator(m_storage.constEnd()); }
+
+    QList<T> values() const {
+        QList<T> vals;
+        for (auto it = m_storage.constBegin(); it != m_storage.constEnd(); ++it) {
+            if (it.value()) vals.append(*it.value());
+        }
+        return vals;
+    }
+
+    QStringList keys() const {
+        QStringList k;
+        for (auto it = m_storage.constBegin(); it != m_storage.constEnd(); ++it) {
+            k.append(it.key());
+        }
+        return k;
+    }
+
+    bool containsPointer(const T* p) const {
+        if (!p) return false;
+        for (auto it = m_storage.constBegin(); it != m_storage.constEnd(); ++it) {
+            auto sp = it.value();
+            if (!sp) continue;
+            const T& v = *sp;
+            if (&v == p) return true;
+        }
+        return false;
+    }
+
+private:
+    Storage m_storage;
+};
+
+extern GENERATOR_EXPORT StableHashMap<Class> classes;
+extern GENERATOR_EXPORT StableHashMap<Typedef> typedefs;
+extern GENERATOR_EXPORT StableHashMap<Enum> enums;
+extern GENERATOR_EXPORT StableHashMap<Function> functions;
+extern GENERATOR_EXPORT StableHashMap<GlobalVar> globals;
+extern GENERATOR_EXPORT StableHashMap<Type> types;
+
+// Runtime validation helper: scans registries and prints inconsistencies when enabled
+void validateAll();
 
 class Method;
 class Field;
@@ -116,7 +228,7 @@ public:
     
     const QList<Method>& methods() const { return m_methods; }
     QList<Method>& methodsRef() { return m_methods; }
-    void appendMethod(const Method& method) { m_methods.append(method); }
+    void appendMethod(const Method& method, bool checkForConstArguments = false);
     
     const QList<Field>& fields() const { return m_fields; }
     QList<Field>& fieldsRef() { return m_fields; }
@@ -225,7 +337,7 @@ public:
     void removeFlag(Flag flag) { m_flags &= ~flag; }
     Flags flags() const { return m_flags; }
 
-    virtual QString toString(bool withAccess = false, bool withClass = false) const;
+    QString toString(bool withAccess = false, bool withClass = false) const;
 
 protected:
     BasicTypeDeclaration* m_typeDecl;
@@ -316,6 +428,9 @@ public:
     void setIsSlot(bool isSlot) { m_isSlot = isSlot; }
     bool isSlot() const { return m_isSlot; }
 
+    void setIsDeleted(bool isDeleted) { m_isDeleted = isDeleted; }
+    bool isDeleted() const { return m_isDeleted; }
+
     // TODO: This actually doesn't belong here. Better add a dynamic property system to Member subclasses.
     //       Then we can also get rid of the various method => foo maps in the 'Util' struct.
     const QStringList& remainingDefaultValues() const { return m_remainingValues; }
@@ -324,10 +439,18 @@ public:
     void setHasExceptionSpec(bool hasSpec) { m_hasExceptionSpec = hasSpec; }
     bool hasExceptionSpec() const { return m_hasExceptionSpec; }
 
+    // Field accessor support - stores the Field this method is an accessor for
+    void setAccessorField(const Field* field) { m_accessorField = field; }
+    const Field* accessorField() const { return m_accessorField; }
+
+    // Global function support - stores the Function this method wraps (for namespace functions)
+    void setGlobalFunction(const Function* func) { m_globalFunction = func; }
+    const Function* globalFunction() const { return m_globalFunction; }
+
     void appendExceptionType(const Type& type) { m_exceptionTypes.append(type); }
     const QList<Type>& exceptionTypes() const { return m_exceptionTypes; }
 
-    virtual QString toString(bool withAccess = false, bool withClass = false, bool withInitializer = true) const;
+    QString toString(bool withAccess = false, bool withClass = false, bool withInitializer = true) const;
 
 protected:
     ParameterList m_params;
@@ -338,6 +461,9 @@ protected:
     bool m_hasExceptionSpec;
     bool m_isSignal;
     bool m_isSlot;
+    bool m_isDeleted;
+    const Field* m_accessorField = nullptr;
+    const Function* m_globalFunction = nullptr;
     QList<Type> m_exceptionTypes;
     QStringList m_remainingValues;
 };
@@ -379,7 +505,7 @@ public:
     void setFileName(const QString& fileName) { m_file = fileName; }
     QString fileName() const { return m_file; }
 
-    virtual QString toString() const;
+    virtual QString toString(bool prepend) const;
 
 protected:
     QString m_name;
@@ -397,7 +523,7 @@ public:
     const ParameterList& parameters() const { return m_params; }
     void appendParameter(const Parameter& param) { m_params.append(param); }
 
-    virtual QString toString() const;
+    virtual QString toString(bool prepend) const;
 
 protected:
     ParameterList m_params;
@@ -429,9 +555,9 @@ public:
     Enum* getEnum() const { return m_enum; }
 
     void setName(const QString& name) { m_name = name; }
-    QString name() const {
+    QString name(bool prepend = true) const {
         if (m_class) {
-            return m_class->toString();
+            return (prepend ? "::": "") + m_class->toString();
         } else if (m_typedef) {
             return m_typedef->toString();
         } else if (m_enum) {
@@ -476,15 +602,17 @@ public:
     const ParameterList& parameters() const { return m_params; }
     void appendParameter(const Parameter& param) { m_params.append(param); }
 
-    QString toString(const QString& fnPtrName = QString()) const;
+    QString toString(const QString& fnPtrName = QString(), bool prepend = true) const;
+
+    bool isAssignable();
 
     // on windows, we can't reference 'types' here, because it's marked __declspec(dllexport) above.
     static Type* registerType(const Type& type)
 #ifndef Q_OS_WIN
     {
         QString typeString = type.toString();
-        QHash<QString, Type>::iterator iter = types.insert(typeString, type);
-        return &iter.value();
+        auto res = types.insert(typeString, type);
+        return &res.value();
     }
 #else
     ;

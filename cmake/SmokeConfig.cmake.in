@@ -108,18 +108,41 @@ function(get_smokegen_output_files RESULT_NAME numXfiles)
 endfunction()
 
 function(run_smokegen numXfiles smokegenArgs)
+    # Collect any additional parent module dependencies passed after smokegenArgs
+    set(_parent_deps "")
+    set(_parent_dep_files "")
+    if(ARGC GREATER 2)
+        math(EXPR _last_arg "${ARGC} - 1")
+        foreach(_i RANGE 2 ${_last_arg})
+            set(_dep_target ${ARGV${_i}})
+            list(APPEND _parent_deps ${_dep_target})
+            # Use generator expression to get the actual DLL/lib file path
+            list(APPEND _parent_dep_files $<TARGET_FILE:${_dep_target}>)
+        endforeach()
+    endif()
+
     # Generate the list of output files based on numXfiles
 
     get_smokegen_output_files(outputFiles ${numXfiles})
 
+    # On Windows Debug builds, disable the debug heap to avoid false positives during
+    # clang's cleanup phase.  _NO_DEBUG_HEAP=1 tells the debug CRT not to use the
+    # debug heap allocator.
+    if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(_SMOKEGEN_ENV ${CMAKE_COMMAND} -E env "_NO_DEBUG_HEAP=1")
+    else()
+        set(_SMOKEGEN_ENV)
+    endif()
+
     add_custom_command(
         OUTPUT ${outputFiles}
-        COMMAND ${SMOKE_GEN_BIN}
+        COMMAND ${_SMOKEGEN_ENV} ${SMOKE_GEN_BIN}
         ARGS ${smokegenArgs}
         DEPENDS
             ${SMOKE_GEN_BIN}
             #${SMOKE_GENERATOR_SMOKE_LIB}
             "${CMAKE_CURRENT_SOURCE_DIR}/smokeconfig.xml"
+            ${_parent_dep_files}
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
 

@@ -23,19 +23,48 @@
 #include <QFileInfo>
 #include <QLibrary>
 
-#include <QtXml>
+#include <QDomDocument>
+#include <QDomElement>
+#include <QDomNode>
 
 #include <QtDebug>
 
 #include <iostream>
 #include <memory>
+#if defined(_WIN32)
+# if !defined(WIN32_LEAN_AND_MEAN)
+#   define WIN32_LEAN_AND_MEAN
+# endif
+# if !defined(NOMINMAX)
+#   define NOMINMAX
+# endif
+# include <windows.h>
+# include <crtdbg.h>
+
+// Custom assertion handler to prevent dialog boxes
+int customAssertHandler(int reportType, char* message, int* returnValue) {
+    // Log the assertion to stderr instead of showing a dialog
+    std::cerr << "CRT Assertion: " << message << std::endl;
+    // Return 1 to tell CRT to continue execution (suppress dialog)
+    *returnValue = 0;
+    return 1; // TRUE means we handled it
+}
+#endif
 
 #include <llvm/ADT/IntrusiveRefCntPtr.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/VirtualFileSystem.h>
+#include <clang/Tooling/CompilationDatabase.h>
+#include <clang/Tooling/ArgumentsAdjusters.h>
 #include <clang/Tooling/Tooling.h>
 
+#include <clang/Basic/FileManager.h>
+#include <clang/Basic/FileSystemOptions.h>
+#include <clang/Frontend/TextDiagnosticPrinter.h>
+#include <clang/Basic/DiagnosticOptions.h>
+
 #include "options.h"
+#include "type.h"
 #include "config.h"
 #include "frontendaction.h"
 #include "embedded_includes.h"
@@ -62,22 +91,25 @@ static void showUsage()
 
 int main(int argc, char **argv)
 {
-    if (argc == 1) {
-        showUsage();
-        return EXIT_SUCCESS;
-    }
+    try
+    {
+        
+        if (argc == 1) {
+            showUsage();
+            return EXIT_SUCCESS;
+        }
 
-    QCoreApplication app(argc, argv);
-    const QStringList& args = app.arguments();
+        QCoreApplication app(argc, argv);
+        const QStringList& args = app.arguments();
 
-    QFileInfo configFile;
-    QString generator;
-    bool addHeaders = false;
-    bool addClangOptions = false;
-    bool hasCommandLineGenerator = false;
-    QStringList classes;
+        QFileInfo configFile;
+        QString generator;
+        bool addHeaders = false;
+        bool addClangOptions = false;
+        bool hasCommandLineGenerator = false;
+        QStringList classes;
 
-    ParserOptions::notToBeResolved << "FILE";
+        ParserOptions::notToBeResolved << "FILE";
 
     std::vector<std::string> Argv {
         argv[0],
@@ -204,7 +236,7 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
     
-    for (QDir dir : ParserOptions::includeDirs) {
+    foreach (QDir dir, ParserOptions::includeDirs) {
         if (!dir.exists()) {
             qWarning() << "include directory" << dir.path() << "doesn't exist";
             ParserOptions::includeDirs.removeAll(dir);
@@ -229,38 +261,45 @@ int main(int argc, char **argv)
     bool logErrors = log.open(QFile::WriteOnly | QFile::Truncate);
     QTextStream logOut(&log);
     
-    for (QFileInfo file : ParserOptions::headerList) {
+    foreach (QFileInfo file, ParserOptions::headerList) {
         qDebug() << "parsing" << file.absoluteFilePath();
 
-        for (QDir dir : ParserOptions::includeDirs) {
+        foreach (QDir dir, ParserOptions::includeDirs) {
             Argv.push_back("-I" + dir.path().toStdString());
         }
-        for (QDir dir : ParserOptions::frameworkDirs) {
+        foreach (QDir dir, ParserOptions::frameworkDirs) {
             Argv.push_back("-iframework");
             Argv.push_back(dir.path().toStdString());
         }
-        for (QString define : defines) {
+        foreach (QString define, defines) {
             Argv.push_back("-D" + define.toStdString());
         }
         Argv.push_back(file.absoluteFilePath().toStdString());
         Argv.push_back("-I/builtins");
         Argv.push_back("-fsyntax-only");
 
-        llvm::IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> overlayFS{new llvm::vfs::OverlayFileSystem(llvm::vfs::getRealFileSystem())};
-        llvm::IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> inMemoryFS{new llvm::vfs::InMemoryFileSystem()};
-        overlayFS->pushOverlay(inMemoryFS);
-
-        for (const EmbeddedFile& file : EmbeddedFiles) {
-            inMemoryFS->addFile(file.filename, 0, llvm::MemoryBuffer::getMemBuffer({file.content, file.size}));
+        // Create an overlay file system with embedded files. Allocate on the heap
+        // and intentionally leak to avoid destructor-induced heap corruption.
+        auto RealFS = llvm::vfs::getRealFileSystem();
+        auto *InMemFS = new llvm::vfs::InMemoryFileSystem;
+        const EmbeddedFile* f = EmbeddedFiles;
+        while (f->filename) {
+            InMemFS->addFile(f->filename, 0, llvm::MemoryBuffer::getMemBuffer({f->content, f->size}, "", false));
+            ++f;
         }
-        clang::FileManager FM({"."}, overlayFS);
-        FM.Retain();
 
-        clang::tooling::ToolInvocation inv(Argv, std::make_unique<SmokegenFrontendAction>(), &FM);
+        auto *OverlayFS = new llvm::vfs::OverlayFileSystem(RealFS);
+        OverlayFS->pushOverlay(llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem>(InMemFS));
 
-        if (!inv.run()) {
+        auto *FM = new clang::FileManager({"."}, llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem>(OverlayFS));
+
+        auto inv = std::make_unique<clang::tooling::ToolInvocation>(Argv, std::make_unique<SmokegenFrontendAction>(), FM);
+
+        if (!inv->run()) {
             return 1;
         }
+
+        inv.release(); // leak to skip teardown
 
         // this has already been parsed because it was included by some header
         if (!logErrors)
@@ -269,5 +308,20 @@ int main(int argc, char **argv)
     
     log.close();
     
-    return generate();
+    // Call the generator to produce output files
+    int result = generate();
+    
+    // Use std::_Exit to skip destructors and avoid heap corruption during LLVM cleanup.
+    // This is a common pattern in LLVM-based tools where:
+    // 1. LLVM is statically linked, creating separate heaps in each module
+    // 2. Cleanup is expensive and unnecessary for a short-lived tool
+    // 3. All important work (file generation) is already complete
+    // Proper fix: rebuild LLVM with -DBUILD_SHARED_LIBS=ON
+    std::_Exit(result);
+    }
+    catch (const std::exception& e)
+    {
+        std::cout << "An error occured: " <<  e.what() << std::endl;
+        std::_Exit(1);
+    }
 }

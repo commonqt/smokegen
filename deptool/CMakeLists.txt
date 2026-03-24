@@ -1,10 +1,14 @@
 project(smokedeptool)
 
-find_package(Qt5Core REQUIRED)
+find_package(${QT_VERSION}Core REQUIRED)
 include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/.. )
 
 add_executable(smokedeptool main.cpp)
-target_link_libraries(smokedeptool smokebase Qt5::Core)
+
+# Clear LLVM's -nostartfiles/-nostdlib flags that may be inherited
+set_target_properties(smokedeptool PROPERTIES LINK_FLAGS "")
+
+target_link_libraries(smokedeptool smokebase ${QT_VERSION}::Core)
 
 if (WIN32)
 	# Realign the stack, for compatibility with an older ABI.

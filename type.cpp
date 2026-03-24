@@ -18,13 +18,14 @@
 
 #include "type.h"
 #include "options.h"
+#include <iostream>
 
-QHash<QString, Class> classes;
-QHash<QString, Typedef> typedefs;
-QHash<QString, Enum> enums;
-QHash<QString, Function> functions;
-QHash<QString, GlobalVar> globals;
-QHash<QString, Type> types;
+StableHashMap<Class> classes;
+StableHashMap<Typedef> typedefs;
+StableHashMap<Enum> enums;
+StableHashMap<Function> functions;
+StableHashMap<GlobalVar> globals;
+StableHashMap<Type> types;
 
 QString BasicTypeDeclaration::toString() const
 {
@@ -97,8 +98,8 @@ const Type* Type::Void = Type::registerType(Type("void"));
 Type* Type::registerType(const Type& type)
 {
     QString typeString = type.toString();
-    QHash<QString, Type>::iterator iter = types.insert(typeString, type);
-    return &iter.value();
+    auto res = types.insert(typeString, type);
+    return &res.value();
 }
 #endif
 
@@ -109,15 +110,33 @@ Type Typedef::resolve() const {
     // not pretty, but safe. 'this' (without const) will never be returned or modified from here on.
     const Type tmp(const_cast<Typedef*>(this));
     const Type* t = &tmp;
+    // Track visited typedef pointers to detect cycles without calling Type::name()
+    QSet<const Typedef*> visited;
+    while (t && t->getTypedef()) {
+        const Typedef* innerTdef = t->getTypedef();
+        if (!innerTdef) break;
 
-    QString name;
-    while (t->getTypedef() && t->name() != name && !ParserOptions::notToBeResolved.contains(t->getTypedef()->name())) {
+        // stop resolving if this typedef's name is in the ignore-list
+        if (ParserOptions::notToBeResolved.contains(innerTdef->name())) break;
+
+        // detect cycles
+        if (visited.contains(innerTdef)) break;
+        visited.insert(innerTdef);
+
         if (!isRef) isRef = t->isRef();
         if (!isConst) isConst = t->isConst();
         if (!isVolatile) isVolatile = t->isVolatile();
-        name = t->name();
-        t = t->getTypedef()->type();
-        for (int i = t->pointerDepth() - 1; i >= 0; i--) {
+
+        // Advance to the underlying type; guard against null
+        const Type* next = innerTdef->type();
+        if (!next) {
+            break;
+        }
+        t = next;
+
+        // Collect pointer constness safely
+        int pd = t->pointerDepth();
+        for (int i = pd - 1; i >= 0; i--) {
             pointerDepth.prepend(t->isConstPointer(i));
         }
     }
@@ -140,38 +159,38 @@ Type Typedef::resolve() const {
     return ret;
 }
 
-QString GlobalVar::toString() const
+QString GlobalVar::toString(bool prepend = true) const
 {
-    QString ret = m_type->toString() + " ";
+    QString ret = m_type->toString(QString(), prepend) + " ";
     if (!m_nspace.isEmpty())
         ret += m_nspace + "::";
     ret += m_name;
     return ret;
 }
 
-QString Function::toString() const
+QString Function::toString(bool prepend = true) const
 {
     QString ret = GlobalVar::toString();
     ret += "(";
     for (int i = 0; i < m_params.count(); i++) {
-        ret += m_params[i].type()->toString();
+        ret += m_params[i].type()->toString(QString(),prepend);
         if (i < m_params.count() - 1) ret += ", ";
     }
     ret += ")";
     return ret;
 }
 
-QString Type::toString(const QString& fnPtrName) const
+QString Type::toString(const QString& fnPtrName, bool prepend) const
 {
     QString ret;
     if (m_isVolatile) ret += "volatile ";
     if (m_isConst) ret += "const ";
-    ret += name();
+    ret += name(prepend);
     if (!m_templateArgs.isEmpty()) {
         ret += "<";
         for (int i = 0; i < m_templateArgs.count(); i++) {
             if (i > 0) ret += ',';
-            ret += m_templateArgs[i].toString();
+            ret += m_templateArgs[i].toString(QString(), prepend);
         }
         ret += ">";
     }
@@ -189,7 +208,7 @@ QString Type::toString(const QString& fnPtrName) const
     if (isArray()) ret += fnPtrName;
     if (isArray() && (m_pointerDepth > 0 || m_isRef)) ret += ')';
     
-    for (int size : m_arrayLengths) {
+    foreach(int size, m_arrayLengths) {
         ret += '[' + QString::number(size) + ']';
     }
     
@@ -197,10 +216,51 @@ QString Type::toString(const QString& fnPtrName) const
         ret += "(*" + fnPtrName + ")(";
         for (int i = 0; i < m_params.count(); i++) {
             if (i > 0) ret += ',';
-            ret += m_params[i].type()->toString();
+            ret += m_params[i].type()->toString(QString(), prepend);
         }
         ret += ')';
     }
     // the compiler would misinterpret ">>" as the operator - replace it with "> >"
     return ret.replace(">>", "> >");
+}
+
+bool Type::isAssignable() {
+    const Class* klass = getClass();   
+    if (klass)
+    {
+        foreach(auto meth, klass->methods()) {
+            if (meth.name() == "operator=" && meth.parameters().first().type() == this) {
+                return !meth.isDeleted();
+            }
+        }
+    }
+    else
+        return true;
+}
+
+void Class::appendMethod(const Method& method, bool checkForConstArguments)
+{ 
+    if (checkForConstArguments)
+    {
+        foreach(auto meth, methods())
+        {
+            if (method.name() == meth.name() && method.isConst() == meth.isConst() && method.parameters().count() == meth.parameters().count())
+            {
+                for (int i = 0; i < method.parameters().count(); i++) {
+
+                    Type* type1 = method.parameters()[i].type();
+                    Type* type2 = meth.parameters()[i].type();
+
+                    if (type1->name() == type2->name() &&
+                        type1->isRef() == type2->isRef() &&
+                        type1->isArray() == type2->isArray() &&
+                        type1->isConst() != type2->isConst())
+                        // Improve me!!!
+                        return;
+
+                }
+            }
+        }
+    }
+    m_methods.append(method); 
 }

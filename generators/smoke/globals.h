@@ -25,13 +25,14 @@
 #include <QString>
 #include <QStringList>
 
+#include <QRegularExpression>
+
 template<typename T>
 class QStack;
 
 class QDir;
 class QFileInfo;
 class QString;
-class QStringList;
 class QTextStream;
 
 class Class;
@@ -53,10 +54,9 @@ struct Options
     static QList<QFileInfo> headerList;
     static QStringList classList;
     static bool qtMode;
-    
-    static QList<QRegExp> excludeExpressions;
-    static QList<QRegExp> includeFunctionNames;
-    static QList<QRegExp> includeFunctionSignatures;
+    static QList<QRegularExpression> excludeExpressions;
+    static QList<QRegularExpression> includeFunctionNames;
+    static QList<QRegularExpression> includeFunctionSignatures;
     
     static bool typeExcluded(const QString& typeName);
     static bool functionNameIncluded(const QString& fnName);
@@ -106,6 +106,9 @@ struct Util
     static QHash<QString, QString> typeMap;
     static QHash<const Method*, const Function*> globalFunctionMap;
     static QHash<const Method*, const Field*> fieldAccessors;
+
+    static QStringList OverridesFinalFunction;
+    static QHash<QString, QString> TypeErroneusOrIncomplete;
     
     static bool isVirtualInheritancePath(const Class* desc, const Class* super);
     static QList<const Class*> superClassList(const Class* klass);
@@ -114,7 +117,7 @@ struct Util
     static void preparse(QSet<Type*> *usedTypes, QSet<const Class*> *superClasses, const QList<QString>& keys);
 
     static bool canClassBeInstanciated(const Class* klass);
-    static bool canClassBeCopied(const Class* klass);
+    static bool canClassBeCopied(const Class* klass, QList<const Class*> list = QList<const Class*>());
     static bool hasClassVirtualDestructor(const Class* klass);
     static bool hasClassPublicDestructor(const Class* klass);
     static const Method* findDestructor(const Class* klass);

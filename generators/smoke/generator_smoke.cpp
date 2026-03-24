@@ -25,7 +25,10 @@
 #include <QString>
 #include <QtDebug>
 
-#include <QtXml>
+#include <QDomDocument>
+#include <QDomElement>
+#include <QDomNode>
+#include <QRegularExpression>
 
 #include <iostream>
 
@@ -45,9 +48,9 @@ QDir Options::libDir;
 QStringList Options::scalarTypes;
 QStringList Options::voidpTypes;
 bool Options::qtMode = false;
-QList<QRegExp> Options::excludeExpressions;
-QList<QRegExp> Options::includeFunctionNames;
-QList<QRegExp> Options::includeFunctionSignatures;
+QList<QRegularExpression> Options::excludeExpressions;
+QList<QRegularExpression> Options::includeFunctionNames;
+QList<QRegularExpression> Options::includeFunctionSignatures;
 
 static void showUsage()
 {
@@ -65,9 +68,9 @@ extern "C" Q_DECL_EXPORT
 int generate()
 {
     Options::headerList = ParserOptions::headerList;
-    
+
     QFileInfo smokeConfig;
-    
+
     const QStringList& args = QCoreApplication::arguments();
     for (int i = 0; i < args.count(); i++) {
         if (  (args[i] == "-m" || args[i] == "-p" || args[i] == "-pm" || args[i] == "-o" ||
@@ -102,7 +105,7 @@ int generate()
             return EXIT_SUCCESS;
         }
     }
-    
+
     if (smokeConfig.exists()) {
         QFile file(smokeConfig.filePath());
         file.open(QIODevice::ReadOnly);
@@ -184,7 +187,7 @@ int generate()
                         continue;
                     }
                     if (elem.tagName() == "signature") {
-                        Options::excludeExpressions << QRegExp(elem.text());
+                      Options::excludeExpressions << QRegularExpression(elem.text());
                     }
                     typeName = typeName.nextSibling();
                 }
@@ -197,9 +200,9 @@ int generate()
                         continue;
                     }
                     if (elem.tagName() == "name") {
-                        Options::includeFunctionNames << QRegExp(elem.text());
+                      Options::includeFunctionNames << QRegularExpression(elem.text());
                     } else if (elem.tagName() == "signature") {
-                        Options::includeFunctionSignatures << QRegExp(elem.text());
+                      Options::includeFunctionSignatures << QRegularExpression(elem.text());
                     }
                     function = function.nextSibling();
                 }
@@ -209,21 +212,23 @@ int generate()
     } else {
         qWarning() << "Couldn't find config file" << smokeConfig.filePath();
     }
-    
+
     if (!Options::outputDir.exists()) {
         qWarning() << "output directoy" << Options::outputDir.path() << "doesn't exist; creating it...";
         QDir::current().mkpath(Options::outputDir.path());
     }
-    
+
     Options::qtMode = ParserOptions::qtMode;
 
-    Options::voidpTypes << "long long" << "long long int" << "unsigned long long" << "unsigned long long int" <<
-        "nullptr_t" << "std::nullptr_t" << "char16_t" << "char32_t";
-    Options::scalarTypes << "long long" << "long long int" << "unsigned long long" << "unsigned long long int" <<
-        "nullptr_t" << "std::nullptr_t" << "char16_t" << "char32_t";
-    
+    Options::voidpTypes << "nullptr_t" << "std::nullptr_t" << "char16_t" << "char32_t";
+    Options::scalarTypes << "nullptr_t" << "std::nullptr_t" << "char16_t" << "char32_t";
+
     // Fill the type map. It maps some long integral types to shorter forms as used in SMOKE.
     Util::typeMap["long int"] = "long";
+    Util::typeMap["long long"] = "llong";
+    Util::typeMap["long long int"] = "llong";
+    Util::typeMap["unsigned long long"] = "ullong";
+    Util::typeMap["unsigned long long int"] = "ullong";
     Util::typeMap["short int"] = "short";
     Util::typeMap["long double"] = "double";
     Util::typeMap["wchar_t"] = "int";   // correct?
@@ -235,13 +240,13 @@ int generate()
     }
 
     qDebug() << "Generating SMOKE sources...";
-    
+
     SmokeDataFile smokeData;
     smokeData.write();
     SmokeClassFiles classFiles(&smokeData);
     classFiles.write();
-    
+
     qDebug() << "Done.";
-    
+
     return EXIT_SUCCESS;
 }
